@@ -1,0 +1,14 @@
+venv/
+__pycache__/
+*.pyc
+*.pyo
+.env
+data/raw/
+data/processed/
+*.zip
+*.tsv
+*.csv
+!data/sql/
+.streamlit/secrets.toml
+.claude
+plan

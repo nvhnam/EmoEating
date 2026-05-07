@@ -1,0 +1,166 @@
+﻿"""
+Individual meal recommendation card component.
+"""
+
+from __future__ import annotations
+
+import streamlit as st
+import sys
+import os
+sys.path.insert(0, os.path.dirname(os.path.dirname(os.path.abspath(__file__))))
+
+import html as _html
+
+from utils.formatting import fmt_kcal, fmt_time, fmt_score, kcal_match_pct
+
+
+NUTRIENT_CHIP_COLORS = {
+    "Tryptophan":    "#AFA9EC",
+    "Omega-3":       "#85B7EB",
+    "Complex Carbs": "#FAC775",
+    "Magnesium":     "#5DCAA5",
+    "Iron":          "#F09595",
+    "B Vitamins":    "#F0997B",
+    "Antioxidants":  "#1D9E75",
+    "Protein":       "#4a90d9",
+    "Fiber":         "#888780",
+}
+
+
+def render_meal_card(
+    food: dict,
+    rank: int,
+    meal_kcal_target: float | None = None,
+    session_id: int | None = None,
+) -> bool:
+    """
+    Render a single meal recommendation card.
+    Returns True if the user clicked "I'll eat this".
+    """
+    name = food.get("name", "Unknown")
+    cuisine = food.get("cuisine") or ""
+    kcal = food.get("calories_kcal")
+    score = food.get("final_score", food.get("affective_score", 0.0))
+    contributors = food.get("top_contributors", [])
+    prep = food.get("prep_time_min")
+    cook = food.get("cook_time_min")
+    is_veg = food.get("is_vegetarian", False)
+    is_vegan = food.get("is_vegan", False)
+    is_gf = food.get("is_gluten_free", False)
+    food_id = food.get("id")
+
+    safe_name = _html.escape(name)
+    safe_cuisine = _html.escape(cuisine) if cuisine else ""
+    cuisine_span = (
+        f'<span style="font-size:11px; color:#6b7280; margin-left:8px;">{safe_cuisine}</span>'
+        if safe_cuisine else ""
+    )
+
+    with st.container():
+        st.markdown(
+            f'<div style="background:#ffffff; border:1px solid #e2e8f0; border-radius:8px; padding:16px; margin-bottom:12px; box-shadow:0 1px 3px rgba(0,0,0,0.06);">'
+            f'<div style="display:flex; justify-content:space-between; align-items:flex-start;">'
+            f'<div>'
+            f'<span style="font-size:11px; color:#6b7280; font-weight:600;">#{rank}</span>'
+            f'<span style="font-size:18px; font-weight:700; color:#1a1a2e; margin-left:6px;">{safe_name}</span>'
+            f'{cuisine_span}'
+            f'</div>'
+            f'<span style="background:#e8f0fb; color:#4a90d9; font-size:11px; font-weight:600; padding:2px 8px; border-radius:12px;">Score: {fmt_score(score)}</span>'
+            f'</div>'
+            f'</div>',
+            unsafe_allow_html=True,
+        )
+
+        col_info, col_action = st.columns([4, 1])
+
+        with col_info:
+            # Caloric info
+            kcal_str = fmt_kcal(kcal)
+            if meal_kcal_target and kcal:
+                pct = kcal_match_pct(kcal, meal_kcal_target)
+                bar_w = int(pct * 100)
+                st.markdown(
+                    f"""
+                    <div style="margin:4px 0 8px 0;">
+                        <span style="font-size:13px; color:#1a1a2e;">{kcal_str}</span>
+                        <span style="font-size:11px; color:#6b7280;"> / target {fmt_kcal(meal_kcal_target)}</span>
+                        <div style="background:#e2e8f0; border-radius:3px; height:4px; margin-top:4px;">
+                            <div style="width:{bar_w}%; background:#4a90d9; height:100%; border-radius:3px;"></div>
+                        </div>
+                    </div>
+                    """,
+                    unsafe_allow_html=True,
+                )
+            else:
+                st.markdown(f"**{kcal_str}**")
+
+            # Nutrient chips
+            if contributors:
+                chips = ""
+                for c in contributors:
+                    color = NUTRIENT_CHIP_COLORS.get(c, "#888780")
+                    chips += (
+                        f'<span style="'
+                        f'background:{color}33; color:{color}; '
+                        f'border:1px solid {color}; '
+                        f'font-size:10px; padding:2px 7px; '
+                        f'border-radius:10px; margin-right:4px;">'
+                        f'{c}</span>'
+                    )
+                st.markdown(chips, unsafe_allow_html=True)
+
+            # Time + dietary flags
+            time_str = ""
+            if prep or cook:
+                total = (prep or 0) + (cook or 0)
+                time_str = f"⏱ {fmt_time(total)}"
+            flags = []
+            if is_vegan:
+                flags.append("🌿 Vegan")
+            elif is_veg:
+                flags.append("🌱 Vegetarian")
+            if is_gf:
+                flags.append("✓ Gluten-free")
+            meta_line = "  ".join(filter(None, [time_str] + flags))
+            if meta_line:
+                st.caption(meta_line)
+
+        with col_action:
+            ate_it = st.button(
+                "I'll eat this",
+                key=f"select_food_{food_id}_{rank}",
+                type="primary",
+            )
+
+        # Expandable detail
+        with st.expander("More details"):
+            detail_col1, detail_col2 = st.columns(2)
+            with detail_col1:
+                st.markdown("**Nutrients (per 100g)**")
+                nutrient_rows = [
+                    ("Calories",     fmt_kcal(food.get("calories_kcal"))),
+                    ("Protein",      f"{food.get('protein_g') or '—'}g"),
+                    ("Carbs",        f"{food.get('carbohydrate_g') or '—'}g"),
+                    ("  Complex",    f"{food.get('complex_carbs_g') or '—'}g"),
+                    ("  Sugar",      f"{food.get('sugar_g') or '—'}g"),
+                    ("Fiber",        f"{food.get('fiber_g') or '—'}g"),
+                    ("Fat",          f"{food.get('fat_g') or '—'}g"),
+                    ("Magnesium",    f"{food.get('magnesium_mg') or '—'}mg"),
+                    ("Iron",         f"{food.get('iron_mg') or '—'}mg"),
+                    ("Vit C",        f"{food.get('vitamin_c_mg') or '—'}mg"),
+                    ("Vit B12",      f"{food.get('vitamin_b12_mcg') or '—'}µg"),
+                    ("Folate",       f"{food.get('folate_mcg') or '—'}µg"),
+                ]
+                for label, val in nutrient_rows:
+                    st.markdown(
+                        f'<div style="display:flex;justify-content:space-between;font-size:12px;">'
+                        f'<span style="color:#6b7280">{label}</span><span>{val}</span></div>',
+                        unsafe_allow_html=True,
+                    )
+            with detail_col2:
+                ingr = food.get("ingredients", [])
+                if ingr:
+                    st.markdown("**Ingredients**")
+                    st.caption(", ".join(str(i) for i in ingr[:20]))
+
+        return ate_it
