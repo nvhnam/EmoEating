@@ -12,6 +12,7 @@ sys.path.insert(0, os.path.dirname(os.path.dirname(os.path.abspath(__file__))))
 import html as _html
 
 from utils.formatting import fmt_kcal, fmt_time, fmt_score, kcal_match_pct
+from config import USE_VN_DATA
 
 
 NUTRIENT_CHIP_COLORS = {
@@ -56,6 +57,16 @@ def render_meal_card(
         if safe_cuisine else ""
     )
 
+    # Vietnamese name shown beneath English name when VN dataset is active
+    vn_name_raw = food.get("description") or ""
+    vn_name_html = ""
+    if USE_VN_DATA and vn_name_raw and vn_name_raw.strip().lower() not in ("none", "nan", ""):
+        safe_vn = _html.escape(vn_name_raw.strip()[:120])
+        vn_name_html = (
+            f'<div style="font-size:13px; color:#6b7280; margin-top:2px; margin-left:6px;">'
+            f'({safe_vn})</div>'
+        )
+
     with st.container():
         st.markdown(
             f'<div style="background:#ffffff; border:1px solid #e2e8f0; border-radius:8px; padding:16px; margin-bottom:12px; box-shadow:0 1px 3px rgba(0,0,0,0.06);">'
@@ -64,6 +75,7 @@ def render_meal_card(
             f'<span style="font-size:11px; color:#6b7280; font-weight:600;">#{rank}</span>'
             f'<span style="font-size:18px; font-weight:700; color:#1a1a2e; margin-left:6px;">{safe_name}</span>'
             f'{cuisine_span}'
+            f'{vn_name_html}'
             f'</div>'
             f'<span style="background:#e8f0fb; color:#4a90d9; font-size:11px; font-weight:600; padding:2px 8px; border-radius:12px;">Score: {fmt_score(score)}</span>'
             f'</div>'

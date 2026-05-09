@@ -14,7 +14,7 @@ import os
 sys.path.insert(0, os.path.dirname(os.path.abspath(__file__)))
 
 st.set_page_config(
-    page_title="MoodMeal",
+    page_title="EmoEating",
     page_icon=":fork_and_knife:",
     layout="wide",
     initial_sidebar_state="collapsed",

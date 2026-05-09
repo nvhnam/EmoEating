@@ -5,9 +5,11 @@ Two-column layout: left context panel | right recommendation cards.
 
 from __future__ import annotations
 
+import html
 import streamlit as st
 import sys
 import os
+from concurrent.futures import ThreadPoolExecutor, as_completed
 sys.path.insert(0, os.path.dirname(os.path.dirname(os.path.abspath(__file__))))
 
 from engine.affect_mapper import emotion_to_va, get_emotion_metadata
@@ -15,8 +17,57 @@ from engine.need_vector import compute_need_vector
 from engine.physiological import PhysiologicalProfile
 from components.nutrient_bars import render_nutrient_bars
 from components.meal_card import render_meal_card
+from components.skeleton_loader import inject_shimmer_css, render_restaurant_skeleton
+from components.restaurant_panel import render_restaurant_panel
+from services.location import get_ip_location, geocode_address
+from services.restaurant_finder import fetch_restaurants_cached
 from utils.formatting import fmt_kcal
-from config import TOP_K_DEFAULT, MEAL_TYPE_LABELS
+from config import (
+    TOP_K_DEFAULT,
+    MEAL_TYPE_LABELS,
+    GOOGLE_PLACES_API_KEY,
+    RESTAURANT_SEARCH_RADIUS_M,
+    RESTAURANT_MAX_RESULTS,
+    USE_VN_DATA,
+)
+
+
+def _render_location_ui(recs: list) -> None:
+    st.markdown("---")
+    st.markdown("**📍 Your Location**")
+    st.caption("City-level only · session-scoped · no GPS")
+
+    user_loc = st.session_state.get("user_location")
+    if user_loc:
+        st.success(f"📌 {user_loc['label']}")
+        if st.button("Change location", key="clear_location"):
+            del st.session_state["user_location"]
+            for food in recs:
+                st.session_state.pop(f"restaurants_{food.get('id')}", None)
+            st.rerun()
+    else:
+        if st.button("Auto-detect my location", key="auto_detect_loc"):
+            with st.spinner("Detecting..."):
+                loc = get_ip_location()
+            if loc:
+                st.session_state["user_location"] = loc
+                st.rerun()
+            else:
+                st.warning("Could not auto-detect. Enter your location below.")
+
+        with st.form("location_form", clear_on_submit=False):
+            addr = st.text_input(
+                "Or enter city / address",
+                placeholder="e.g. Ho Chi Minh City",
+            )
+            if st.form_submit_button("Search") and addr.strip():
+                with st.spinner("Geocoding..."):
+                    loc = geocode_address(addr.strip(), GOOGLE_PLACES_API_KEY)
+                if loc:
+                    st.session_state["user_location"] = loc
+                    st.rerun()
+                else:
+                    st.warning("Address not found. Try a different format.")
 
 
 def _get_profile() -> PhysiologicalProfile | None:
@@ -28,6 +79,9 @@ def _get_profile() -> PhysiologicalProfile | None:
 
 
 def show():
+    if USE_VN_DATA:
+        st.sidebar.info("🇻🇳 Vietnamese Food Dataset active")
+
     emotion = st.session_state.get("detected_emotion")
     if not emotion:
         st.warning("No emotion detected. Please go back and select an emotion.")
@@ -130,6 +184,8 @@ def show():
                 f"Meal target: ~{fmt_kcal(profile.meal_kcal_target)}"
             )
 
+        _render_location_ui(recs)
+
         st.markdown("---")
         if st.button("← Adjust emotion"):
             del st.session_state["recommendations"]
@@ -172,6 +228,118 @@ def show():
                         pass
                 st.session_state["selected_food"] = food
                 st.success(f"Great choice! Enjoy your {food.get('name', 'meal')} 🍽️")
+
+        # ── Nearby Restaurants Section ───────────────────────────────────────
+        user_location = st.session_state.get("user_location")
+        if user_location:
+            inject_shimmer_css()
+            st.markdown("---")
+            st.markdown("### 🗺️ Find these dishes near you")
+            st.caption(
+                f"Showing restaurants within "
+                f"**{RESTAURANT_SEARCH_RADIUS_M // 1000} km** of "
+                f"**{user_location['label']}**"
+            )
+
+            lat   = user_location["lat"]
+            lng   = user_location["lng"]
+            lat_r = round(lat, 3)
+            lng_r = round(lng, 3)
+
+            def _restaurant_search_name(food: dict) -> str:
+                """Return the dish name to use for restaurant search.
+
+                In VN mode: use the Vietnamese name (stored in description) so
+                Google Maps and OSM find local restaurant listings by their actual
+                Vietnamese name. Falls back to the English name if absent.
+                """
+                if USE_VN_DATA:
+                    vn = (food.get("description") or "").strip()
+                    if vn and vn.lower() not in ("none", "nan"):
+                        return vn
+                return food.get("name", "")
+
+            def _restaurant_label(food: dict) -> str:
+                """Return the display label for the restaurant section heading."""
+                en = food.get("name", "Unknown")
+                if USE_VN_DATA:
+                    vn = (food.get("description") or "").strip()
+                    if vn and vn.lower() not in ("none", "nan"):
+                        return f"{vn} ({en})"
+                return en
+
+            _lang = "vi" if USE_VN_DATA else "en"
+
+            # Step 1: Create all placeholders synchronously; show skeletons immediately.
+            placeholders: dict = {}
+            for food in recs:
+                fid   = food.get("id")
+                label = _restaurant_label(food)[:80]
+                st.markdown(
+                    f'<div style="font-size:13px; font-weight:600; color:#1a1a2e; '
+                    f'margin:10px 0 2px 0;">{html.escape(label)}</div>',
+                    unsafe_allow_html=True,
+                )
+                placeholder = st.empty()
+                placeholders[fid] = placeholder
+                if f"restaurants_{fid}" not in st.session_state:
+                    placeholder.markdown(
+                        render_restaurant_skeleton(n_rows=3),
+                        unsafe_allow_html=True,
+                    )
+
+            # Step 2: Render already-cached results instantly.
+            for food in recs:
+                fid = food.get("id")
+                if f"restaurants_{fid}" in st.session_state:
+                    with placeholders[fid].container():
+                        render_restaurant_panel(
+                            fetch_result=st.session_state[f"restaurants_{fid}"],
+                            food_name=food.get("name", ""),
+                            rank=food.get("rank", 0),
+                            session_id=st.session_state.get("session_id"),
+                            food_id=fid,
+                        )
+
+            # Step 3: Fetch uncached in parallel; update placeholders as each completes.
+            to_fetch = [f for f in recs if f"restaurants_{f.get('id')}" not in st.session_state]
+            if to_fetch:
+                def _fetch_one(food: dict) -> tuple:
+                    fid    = food.get("id")
+                    result = fetch_restaurants_cached(
+                        dish_name     = _restaurant_search_name(food),
+                        food_id       = fid,
+                        lat_rounded   = lat_r,
+                        lng_rounded   = lng_r,
+                        radius_m      = RESTAURANT_SEARCH_RADIUS_M,
+                        max_results   = RESTAURANT_MAX_RESULTS,
+                        api_key       = GOOGLE_PLACES_API_KEY,
+                        language_code = _lang,
+                    )
+                    return fid, result
+
+                with ThreadPoolExecutor(max_workers=min(len(to_fetch), 5)) as executor:
+                    futures = {executor.submit(_fetch_one, food): food for food in to_fetch}
+                    for future in as_completed(futures):
+                        fid, fetch_result = future.result()
+                        st.session_state[f"restaurants_{fid}"] = fetch_result
+                        food_entry = next((f for f in recs if f.get("id") == fid), {})
+                        placeholders[fid].empty()
+                        with placeholders[fid].container():
+                            render_restaurant_panel(
+                                fetch_result = fetch_result,
+                                food_name    = food_entry.get("name", ""),
+                                rank         = food_entry.get("rank", 0),
+                                session_id   = st.session_state.get("session_id"),
+                                food_id      = fid,
+                            )
+        else:
+            st.markdown("---")
+            st.info(
+                "📍 **Set your location** in the left panel to discover nearby restaurants "
+                "serving these dishes.",
+                icon=None,
+            )
 
 
 def _demo_recommendations(emotion: str, need, profile) -> list[dict]:

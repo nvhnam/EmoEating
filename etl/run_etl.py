@@ -25,11 +25,15 @@ sys.path.insert(0, str(PROJECT_ROOT / "app"))
 sys.path.insert(0, str(PROJECT_ROOT))
 
 from sqlalchemy import create_engine, text
-from etl.config import DB_URL, USDA_FILE, FOODCOM_RECIPES, EPICURIOUS_FILE, INDIAN_FILE, OPENFOODFACTS_FILE
+from etl.config import (
+    DB_URL, VN_DB_URL,
+    USDA_FILE, FOODCOM_RECIPES, EPICURIOUS_FILE, INDIAN_FILE, OPENFOODFACTS_FILE,
+    VIETNAMESE_FILE,
+)
 from etl.transformers.nutrient_normalizer import compute_normalization_cache
 
 
-ALL_DATASETS = ["usda", "foodcom", "epicurious", "indian", "off"]
+ALL_DATASETS = ["usda", "foodcom", "epicurious", "indian", "off", "vietnamese"]
 
 
 def run(datasets: list[str]) -> None:
@@ -41,7 +45,7 @@ def run(datasets: list[str]) -> None:
             c.execute(text("SELECT 1"))
         print("âœ“ Database connection OK")
     except Exception as e:
-        print(f"âœ— Cannot connect to database: {e}")
+        print(f"Cannot connect to database: {e}")
         print("  Ensure MySQL is running and schema is initialised:")
         print("  mysql -u root -p < data/sql/01_schema.sql")
         print("  mysql -u root -p moodmeal < data/sql/02_seed_categories.sql")
@@ -88,6 +92,28 @@ def run(datasets: list[str]) -> None:
             total += n
         else:
             print(f"  WARNING: Open Food Facts file not found at {OPENFOODFACTS_FILE}")
+
+    if "vietnamese" in datasets:
+        if VIETNAMESE_FILE.exists():
+            vn_engine = create_engine(VN_DB_URL, echo=False, pool_pre_ping=True)
+            try:
+                with vn_engine.connect() as c:
+                    c.execute(text("SELECT 1"))
+                print("✓ moodmeal_vn connection OK")
+            except Exception as e:
+                print(f"✗ Cannot connect to moodmeal_vn: {e}")
+                print("  Initialise the VN schema first:")
+                print("    mysql -u root -p < data/sql/vn_01_schema.sql")
+                print("    mysql -u root -p moodmeal_vn < data/sql/vn_02_seed_categories.sql")
+                sys.exit(1)
+            from etl.loaders.load_vietnamese import load as load_vn
+            n = load_vn(vn_engine, str(VIETNAMESE_FILE))
+            total += n
+            print("\nComputing VN normalization cache...")
+            n_vn = compute_normalization_cache(vn_engine)
+            print(f"✓ VN normalization cache: {n_vn} rows updated.")
+        else:
+            print(f"  WARNING: Vietnamese file not found at {VIETNAMESE_FILE}")
 
     # Normalization cache
     print("\nComputing normalization cache...")

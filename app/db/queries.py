@@ -231,6 +231,44 @@ def _get_user_id(session_token: str, conn) -> Optional[int]:
     return row[0] if row else None
 
 
+def log_restaurant_impression(
+    session_id: int,
+    food_id: Optional[int],
+    restaurant: dict,
+    db_conn=None,
+) -> int:
+    """INSERT into restaurant_impressions. Returns new row id."""
+    sql = text("""
+        INSERT INTO restaurant_impressions
+            (session_id, food_id, place_id, restaurant_name, restaurant_address,
+             distance_m, rating, price_level, is_open, r_score, data_source)
+        VALUES
+            (:session_id, :food_id, :place_id, :name, :address,
+             :distance_m, :rating, :price_level, :is_open, :r_score, :source)
+    """)
+    params = {
+        "session_id":  session_id,
+        "food_id":     food_id,
+        "place_id":    restaurant.get("place_id", ""),
+        "name":        restaurant.get("name", "")[:255],
+        "address":     (restaurant.get("address") or "")[:500],
+        "distance_m":  restaurant.get("distance_m"),
+        "rating":      restaurant.get("rating"),
+        "price_level": restaurant.get("price_level"),
+        "is_open":     restaurant.get("is_open"),
+        "r_score":     restaurant.get("r_score"),
+        "source":      restaurant.get("source", "google_places"),
+    }
+    conn = _conn(db_conn)
+    try:
+        result = conn.execute(sql, params)
+        conn.commit()
+        return result.lastrowid
+    finally:
+        if db_conn is None:
+            conn.close()
+
+
 def get_corpus_stats(db_conn=None) -> dict:
     """Return corpus size stats per source and meal_type."""
     sql = """

@@ -1,13 +1,14 @@
 -- ============================================================
--- MoodMeal Research Database Schema
+-- MoodMeal Vietnamese Research Database Schema
+-- Schema: moodmeal_vn (identical structure to moodmeal)
 -- Engine: MySQL 8.0+  Charset: utf8mb4
 -- ============================================================
 
-CREATE DATABASE IF NOT EXISTS moodmeal
+CREATE DATABASE IF NOT EXISTS moodmeal_vn
   DEFAULT CHARACTER SET utf8mb4
   DEFAULT COLLATE utf8mb4_unicode_ci;
 
-USE moodmeal;
+USE moodmeal_vn;
 
 -- ------------------------------------------------------------
 -- TABLE: food_categories
@@ -223,11 +224,6 @@ CREATE TABLE IF NOT EXISTS restaurant_impressions (
     is_open            BOOLEAN NULL,
     r_score            DECIMAL(6,5) NULL,
     data_source        ENUM('google_places','foursquare','here','osm') NOT NULL DEFAULT 'google_places',
-    -- maps_clicked is reserved for future click-tracking instrumentation.
-    -- It is NOT set by the current implementation (the "View on Maps →" link
-    -- is a plain <a> tag with no server-side callback). Log rows are inserted
-    -- with maps_clicked=FALSE. A future version may use st.experimental_get_query_params
-    -- or a redirect endpoint to flip this flag. Do not attempt to set it to TRUE now.
     maps_clicked       BOOLEAN NOT NULL DEFAULT FALSE,
     shown_at           TIMESTAMP DEFAULT CURRENT_TIMESTAMP,
     FOREIGN KEY (session_id) REFERENCES recommendation_sessions(id) ON DELETE CASCADE,

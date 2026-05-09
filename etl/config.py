@@ -17,6 +17,7 @@ FOODCOM_INTER      = DATA_RAW / "RAW_interactions.csv"
 OPENFOODFACTS_FILE = DATA_RAW / "en.openfoodfacts.org.products.tsv"
 EPICURIOUS_FILE    = DATA_RAW / "epi_r.csv"
 INDIAN_FILE        = DATA_RAW / "indian_food.csv"
+VIETNAMESE_FILE    = DATA_RAW / "vietnamese_food.csv"
 
 # DB credentials (resolved from environment)
 import sys
@@ -32,5 +33,18 @@ DB_URL = _URL.create(
     host=DB_HOST,
     port=DB_PORT,
     database=DB_NAME,
+    query={"charset": "utf8mb4"},
+)
+
+# Separate schema for Vietnamese food data
+VN_DB_NAME = os.getenv("MOODMEAL_VN_DB_NAME", "moodmeal_vn")
+
+VN_DB_URL = _URL.create(
+    drivername="mysql+pymysql",
+    username=DB_USER,
+    password=DB_PASS,
+    host=DB_HOST,
+    port=DB_PORT,
+    database=VN_DB_NAME,
     query={"charset": "utf8mb4"},
 )
