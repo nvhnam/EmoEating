@@ -46,3 +46,9 @@ def log_food_selection(session_id: int, food_id: int, db_conn=None) -> None:
     """Record which food the user chose from the recommendations."""
     from db.queries import log_selection
     log_selection(session_id, food_id, db_conn=db_conn)
+
+
+def log_restaurant_impression(session_id, food_id, restaurant, db_conn=None) -> None:
+    """Fire-and-forget wrapper. Exceptions swallowed by caller."""
+    from db.queries import log_restaurant_impression as _log
+    _log(session_id, food_id, restaurant, db_conn=db_conn)

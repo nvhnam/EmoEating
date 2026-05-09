@@ -17,7 +17,7 @@ def show():
         """
         <div style="text-align:center; padding:40px 20px 20px 20px;">
             <h1 style="font-size:2.4rem; color:#1a1a2e; font-weight:800; margin-bottom:8px;">
-                MoodMeal
+                EmoEating
             </h1>
             <p style="font-size:1.1rem; color:#6b7280; max-width:600px; margin:0 auto 24px auto;">
                 Emotion-aware meal recommendations grounded in affective neuroscience
@@ -61,14 +61,12 @@ def show():
             "and I consent to participate.",
         )
 
-        if consent:
-            if st.button("Start â†’", type="primary", use_container_width=True):
-                if "session_token" not in st.session_state:
-                    st.session_state["session_token"] = str(uuid.uuid4())
-                st.session_state["consented"] = True
-                st.switch_page("pages/02_profile.py")
-        else:
-            st.button("Start â†’", disabled=True, use_container_width=True)
+        if st.button("Start →", type="primary", use_container_width=True, disabled=not consent):
+            if "session_token" not in st.session_state:
+                st.session_state["session_token"] = str(uuid.uuid4())
+            st.session_state["consented"] = True
+            st.switch_page("pages/02_profile.py")
+        if not consent:
             st.caption("Please consent to proceed.")
 
 show()

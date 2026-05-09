@@ -38,6 +38,12 @@ DB_NAME = os.getenv("MOODMEAL_DB_NAME", "moodmeal")
 DB_USER = os.getenv("MOODMEAL_DB_USER", "root")
 DB_PASS = os.getenv("MOODMEAL_DB_PASS", "")
 
+# Vietnamese dataset feature flag
+# true  → app connects to moodmeal_vn (Vietnamese food data)
+# false → app connects to moodmeal (original multi-dataset)
+USE_VN_DATA = os.getenv("USE_VN_DATA", "false").strip().lower() in ("1", "true", "yes")
+VN_DB_NAME  = os.getenv("MOODMEAL_VN_DB_NAME", "moodmeal_vn")
+
 # Activity multiplier: sedentary post-work home scenario (Mifflin-St Jeor 1990)
 ACTIVITY_MULTIPLIER = 1.2
 
@@ -65,3 +71,25 @@ NUTRIENT_DISPLAY = [
     ("fiber",         "Fiber"),
     ("sugar_penalty", "Sugar (penalty)"),
 ]
+
+# ── Nearby Restaurants Feature ───────────────────────────────────────────────
+GOOGLE_PLACES_API_KEY          = os.getenv("GOOGLE_PLACES_API_KEY", "")
+FOURSQUARE_API_KEY             = os.getenv("FOURSQUARE_API_KEY", "")
+HERE_API_KEY                   = os.getenv("HERE_API_KEY", "")
+RESTAURANT_SEARCH_RADIUS_M     = int(os.getenv("RESTAURANT_SEARCH_RADIUS_M", "2000"))
+RESTAURANT_MAX_RESULTS         = int(os.getenv("RESTAURANT_MAX_RESULTS", "4"))
+RESTAURANT_CACHE_TTL           = 3600          # seconds for @st.cache_data
+
+# Composite ranking weights: R = α·proximity + β·rating + γ·availability
+# Documented in paper §4.3; externalized for ablation experiments.
+RESTAURANT_SCORE_WEIGHTS = {"alpha": 0.50, "beta": 0.30, "gamma": 0.20}
+
+# ipapi.co endpoint — get_ip_location() constructs URL as f"https://ipapi.co/{client_ip}/json/"
+# after extracting the real client IP from the X-Forwarded-For header.
+IPAPI_ENDPOINT                 = "https://ipapi.co/"
+GOOGLE_PLACES_TEXT_SEARCH_URL  = "https://places.googleapis.com/v1/places:searchText"
+FOURSQUARE_SEARCH_URL          = "https://places-api.foursquare.com/places/search"  # migrated from api.foursquare.com/v3/
+HERE_SEARCH_URL                = "https://discover.search.hereapi.com/v1/discover"
+# HERE_SEARCH_URL                = "https://geocode.search.hereapi.com/v1/geocode"
+# HTTPS endpoint — avoids mixed-content issues on HTTPS-hosted Streamlit Cloud.
+OSM_OVERPASS_URL               = "https://overpass-api.de/api/interpreter"
