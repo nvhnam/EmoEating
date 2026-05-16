@@ -71,6 +71,8 @@ CREATE TABLE IF NOT EXISTS food_nutrients (
     folate_mcg          DECIMAL(8,3) NULL,
     vitamin_c_mg        DECIMAL(8,3) NULL,
     vitamin_e_mg        DECIMAL(8,3) NULL,
+    vitamin_b6_mg       DECIMAL(6,3) NULL,
+    vitamin_d_mcg       DECIMAL(6,3) NULL,
     vitamin_a_mcg       DECIMAL(8,3) NULL,
     calcium_mg          DECIMAL(8,3) NULL,
     zinc_mg             DECIMAL(8,3) NULL,
@@ -191,6 +193,7 @@ SELECT
     n.calories_kcal,
     n.protein_g,
     n.carbohydrate_g,
+    n.fat_g,
     n.complex_carbs_g,
     n.fiber_g,
     n.sugar_g,
@@ -202,6 +205,8 @@ SELECT
     n.folate_mcg,
     n.vitamin_c_mg,
     n.vitamin_e_mg,
+    n.vitamin_b6_mg,
+    n.vitamin_d_mcg,
     n.data_completeness
 FROM foods f
 JOIN food_categories fc ON f.category_id = fc.id
