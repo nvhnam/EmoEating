@@ -40,5 +40,17 @@ def render_emotion_selector(selected: str | None = None) -> str | None:
                 )
                 if clicked:
                     selected_this_render = emotion
+                    # Commit the new selection and drop all cached recs here,
+                    # in the button's own click run, so these writes are never
+                    # discarded by st.switch_page() in a subsequent callback.
+                    st.session_state["detected_emotion"] = emotion
+                    st.session_state.pop("recommendations", None)
+                    st.session_state.pop("_reco_emotion", None)
+                    st.session_state.pop("session_id", None)
+                    for _k in [
+                        k for k in st.session_state
+                        if k.startswith(("food_images_", "restaurants_"))
+                    ]:
+                        del st.session_state[_k]
 
     return selected_this_render

@@ -110,6 +110,21 @@ def show():
             st.switch_page("pages/03_emotion.py")
         return
 
+    # ── Stale-cache eviction (authoritative, runs before any widget renders) ──
+    # Evict cached recommendations when they exist but were computed for a
+    # different emotion. Guarding on "recommendations" presence (not just
+    # _reco_emotion comparison) makes this self-consistent: if recs were already
+    # cleared by the emotion-selector or the "← Adjust emotion" callback, this
+    # block is a no-op and the recompute guard below fires unconditionally.
+    _cached_reco_emotion = st.session_state.get("_reco_emotion")
+    if "recommendations" in st.session_state and _cached_reco_emotion != emotion:
+        st.session_state.pop("recommendations", None)
+        st.session_state.pop("_reco_emotion", None)
+        st.session_state.pop("session_id", None)
+        _stale = [k for k in st.session_state if k.startswith(("food_images_", "restaurants_"))]
+        for _k in _stale:
+            del st.session_state[_k]
+
     meal_type = st.session_state.get("meal_type", "dinner")
     dietary_restrictions = st.session_state.get("dietary_restrictions", [])
     profile = _get_profile()
@@ -121,7 +136,7 @@ def show():
     meta = get_emotion_metadata(emotion)
 
     # Run recommendation engine
-    if "recommendations" not in st.session_state or st.session_state.get("_reco_emotion") != emotion:
+    if "recommendations" not in st.session_state:
         with st.spinner("Computing recommendations..."):
             try:
                 from db.connection import test_connection
@@ -209,7 +224,19 @@ def show():
 
         st.markdown("---")
         if st.button("← Adjust emotion"):
-            del st.session_state["recommendations"]
+            # Eagerly clear all recommendation state now so page 04 always
+            # recomputes on the next visit, regardless of which emotion the
+            # user picks and regardless of Streamlit rerun timing.
+            st.session_state.pop("recommendations", None)
+            st.session_state.pop("_reco_emotion", None)
+            st.session_state.pop("session_id", None)
+            st.session_state.pop("detected_emotion", None)
+            _stale_keys = [
+                k for k in st.session_state
+                if k.startswith(("food_images_", "restaurants_"))
+            ]
+            for _k in _stale_keys:
+                del st.session_state[_k]
             st.switch_page("pages/03_emotion.py")
 
     with right:
@@ -240,7 +267,7 @@ def show():
 
                 def _fetch_img(food: dict) -> tuple:
                     return food.get("id"), fetch_food_images(
-                        food.get("name", ""), food.get("image_url"), 3
+                        food.get("name", ""), food.get("image_url"), 3, food.get("id")
                     )
 
                 with ThreadPoolExecutor(max_workers=min(len(_to_fetch_img), 5)) as _img_ex:

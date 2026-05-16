@@ -36,7 +36,7 @@ def render_food_image_gallery(
             urls = st.session_state[cache_key]
         else:
             with st.spinner("Fetching photos..."):
-                urls = fetch_food_images(food_name, image_url, FOOD_IMAGE_COUNT)
+                urls = fetch_food_images(food_name, image_url, FOOD_IMAGE_COUNT, food_id)
             st.session_state[cache_key] = urls
 
         if not urls:

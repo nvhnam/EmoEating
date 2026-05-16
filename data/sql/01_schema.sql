@@ -176,6 +176,7 @@ SELECT
     f.id,
     f.name,
     f.description,
+    f.image_url,
     fc.name          AS category,
     f.meal_type,
     f.cuisine,

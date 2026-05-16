@@ -89,6 +89,14 @@ def show():
 
     if current_emotion:
         if st.button("Get Recommendations →", type="primary"):
+            st.session_state.pop("recommendations", None)
+            st.session_state.pop("_reco_emotion", None)
+            _stale_keys = [
+                k for k in st.session_state
+                if k.startswith(("food_images_", "restaurants_"))
+            ]
+            for _k in _stale_keys:
+                del st.session_state[_k]
             st.switch_page("pages/04_recommendations.py")
     else:
         st.button("Get Recommendations →", disabled=True)
