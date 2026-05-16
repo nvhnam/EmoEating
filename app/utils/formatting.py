@@ -1,28 +1,31 @@
-﻿"""Number formatting and portion size display helpers."""
+"""Number formatting and portion size display helpers."""
 
 from __future__ import annotations
 
+_DASH = "–"  # en dash, used as a placeholder when a value is None
+
+
 def fmt_kcal(kcal) -> str:
     if kcal is None:
-        return "â€”"
+        return _DASH
     return f"{int(round(kcal))} kcal"
 
 
 def fmt_g(value, decimals: int = 1) -> str:
     if value is None:
-        return "â€”"
+        return _DASH
     return f"{round(float(value), decimals)}g"
 
 
 def fmt_mg(value, decimals: int = 1) -> str:
     if value is None:
-        return "â€”"
+        return _DASH
     return f"{round(float(value), decimals)}mg"
 
 
 def fmt_time(minutes) -> str:
     if minutes is None:
-        return "â€”"
+        return _DASH
     m = int(minutes)
     if m < 60:
         return f"{m} min"
@@ -46,7 +49,7 @@ def portion_size_label(serving_size_g) -> str:
 
 
 def kcal_match_pct(food_kcal, target_kcal) -> float:
-    """Return 0â€“1 fraction of how close food_kcal is to target_kcal."""
+    """Return 0-1 fraction of how close food_kcal is to target_kcal."""
     if food_kcal is None or target_kcal is None or target_kcal <= 0:
         return 0.0
     ratio = float(food_kcal) / float(target_kcal)

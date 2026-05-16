@@ -1,12 +1,20 @@
 from __future__ import annotations
 
 import math
+import sys
 from typing import Optional
 
 import requests
 import streamlit as st
 
-from config import GOOGLE_PLACES_TEXT_SEARCH_URL
+from config import (
+    GOOGLE_PLACES_TEXT_SEARCH_URL,
+    GEOJS_ENDPOINT,
+    IPWHOIS_ENDPOINT,
+    NOMINATIM_REVERSE_URL,
+)
+
+_NOMINATIM_UA = {"User-Agent": "MoodMeal/1.0 (research prototype)"}
 
 
 def _geocode_via_places_api(
@@ -58,7 +66,7 @@ def _geocode_nominatim(address: str, timeout_s: float) -> Optional[dict]:
         resp = requests.get(
             "https://nominatim.openstreetmap.org/search",
             params={"q": address, "format": "json", "limit": 1},
-            headers={"User-Agent": "MoodMeal/1.0 (research prototype)"},
+            headers=_NOMINATIM_UA,
             timeout=timeout_s,
         )
         if resp.status_code != 200:
@@ -77,9 +85,32 @@ def _geocode_nominatim(address: str, timeout_s: float) -> Optional[dict]:
         return None
 
 
+def reverse_geocode(lat: float, lng: float, timeout_s: float = 3.0) -> Optional[str]:
+    """Convert lat/lng to a human-readable city label using Nominatim reverse geocoding."""
+    try:
+        resp = requests.get(
+            NOMINATIM_REVERSE_URL,
+            params={"lat": lat, "lon": lng, "format": "json", "zoom": 10},
+            headers=_NOMINATIM_UA,
+            timeout=timeout_s,
+        )
+        if resp.status_code != 200:
+            return None
+        data = resp.json()
+        addr = data.get("address", {})
+        parts = [
+            addr.get(k)
+            for k in ("city", "town", "village", "state", "country")
+            if addr.get(k)
+        ]
+        return ", ".join(parts[:2]) if parts else data.get("display_name")
+    except Exception:
+        return None
+
+
 def get_ip_location(timeout_s: float = 3.0) -> Optional[dict]:
     """
-    Geolocate the end-user's IP. Tries ipapi.co first; falls back to ipinfo.io.
+    Geolocate the end-user's IP using a 4-provider fallback chain.
     On Streamlit Cloud reads real client IP from X-Forwarded-For header.
     Returns None on total failure so callers can prompt for manual entry.
     """
@@ -90,7 +121,7 @@ def get_ip_location(timeout_s: float = 3.0) -> Optional[dict]:
     except Exception:
         pass
 
-    # Attempt 1: ipapi.co
+    # Attempt 1: ipapi.co (1,000 req/day free tier)
     try:
         url = f"https://ipapi.co/{client_ip}/json/" if client_ip else "https://ipapi.co/json/"
         resp = requests.get(url, timeout=timeout_s)
@@ -106,7 +137,7 @@ def get_ip_location(timeout_s: float = 3.0) -> Optional[dict]:
     except Exception:
         pass
 
-    # Attempt 2: ipinfo.io fallback (50k req/month free, HTTPS)
+    # Attempt 2: ipinfo.io (50k req/month free, HTTPS)
     try:
         url = f"https://ipinfo.io/{client_ip}/json" if client_ip else "https://ipinfo.io/json"
         resp = requests.get(url, timeout=timeout_s)
@@ -124,7 +155,66 @@ def get_ip_location(timeout_s: float = 3.0) -> Optional[dict]:
     except Exception:
         pass
 
+    # Attempt 3: geojs.io (free, unlimited, HTTPS)
+    try:
+        url = f"{GEOJS_ENDPOINT}{client_ip}.json" if client_ip else "https://get.geojs.io/v1/ip/geo.json"
+        resp = requests.get(url, timeout=timeout_s)
+        if resp.status_code == 200:
+            data = resp.json()
+            lat = float(data.get("latitude") or 0)
+            lng = float(data.get("longitude") or 0)
+            if lat or lng:
+                return {
+                    "lat":    lat,
+                    "lng":    lng,
+                    "label":  f"{data.get('city', '')}, {data.get('country_code', '')}".strip(", "),
+                    "source": "ip_auto",
+                }
+    except Exception:
+        pass
+
+    # Attempt 4: ipwhois.app (10k req/month free, HTTPS)
+    try:
+        url = f"{IPWHOIS_ENDPOINT}{client_ip}" if client_ip else IPWHOIS_ENDPOINT
+        resp = requests.get(url, timeout=timeout_s)
+        if resp.status_code == 200:
+            data = resp.json()
+            if data.get("success") is not False:
+                lat = float(data.get("latitude") or 0)
+                lng = float(data.get("longitude") or 0)
+                if lat or lng:
+                    return {
+                        "lat":    lat,
+                        "lng":    lng,
+                        "label":  f"{data.get('city', '')}, {data.get('country_code', '')}".strip(", "),
+                        "source": "ip_auto",
+                    }
+    except Exception:
+        pass
+
+    print("[location] all IP geolocation APIs failed", file=sys.stderr)
     return None
+
+
+def get_browser_location() -> Optional[dict]:
+    """
+    Browser-based GPS via streamlit_js_eval. Works on HTTPS (Streamlit Cloud).
+    Async: returns None on the first call; populated dict on subsequent reruns
+    once the JS Promise resolves and the user grants permission.
+    """
+    try:
+        from streamlit_js_eval import get_geolocation
+    except ImportError:
+        return None
+    loc = get_geolocation()
+    if not loc or "coords" not in loc:
+        return None
+    lat = loc["coords"].get("latitude")
+    lng = loc["coords"].get("longitude")
+    if lat is None or lng is None:
+        return None
+    label = reverse_geocode(float(lat), float(lng)) or "My location"
+    return {"lat": float(lat), "lng": float(lng), "label": label, "source": "browser_gps"}
 
 
 def geocode_address(address: str, api_key: str, timeout_s: float = 3.0) -> Optional[dict]:

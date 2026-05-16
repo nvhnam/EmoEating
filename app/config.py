@@ -93,3 +93,15 @@ HERE_SEARCH_URL                = "https://discover.search.hereapi.com/v1/discove
 # HERE_SEARCH_URL                = "https://geocode.search.hereapi.com/v1/geocode"
 # HTTPS endpoint — avoids mixed-content issues on HTTPS-hosted Streamlit Cloud.
 OSM_OVERPASS_URL               = "https://overpass-api.de/api/interpreter"
+
+# ── Additional IP geolocation fallbacks (for Streamlit Cloud reliability) ────
+GEOJS_ENDPOINT        = "https://get.geojs.io/v1/ip/geo/"
+IPWHOIS_ENDPOINT      = "https://ipwhois.app/json/"
+NOMINATIM_REVERSE_URL = "https://nominatim.openstreetmap.org/reverse"
+
+# ── Food image service ────────────────────────────────────────────────────────
+FOOD_IMAGE_CACHE_TTL     = 3600
+FOOD_IMAGE_COUNT         = 3
+OPENFOODFACTS_SEARCH_URL = "https://world.openfoodfacts.org/cgi/search.pl"
+WIKIPEDIA_API_URL        = "https://en.wikipedia.org/w/api.php"
+WIKIMEDIA_API_URL        = "https://commons.wikimedia.org/w/api.php"
