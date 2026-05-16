@@ -13,6 +13,8 @@ sys.path.insert(0, os.path.dirname(os.path.dirname(os.path.abspath(__file__))))
 from components.emotion_selector import render_emotion_selector
 from components.circumplex_plot import render_circumplex
 from engine.affect_mapper import emotion_to_va
+from engine.zone_classifier import classify_zone
+from config import ZONE_LABELS, ZONE_COLORS
 
 
 def show():
@@ -55,6 +57,9 @@ def show():
     with col_info:
         if current_emotion:
             V, A = emotion_to_va(current_emotion)
+            zone = classify_zone(V, A)
+            zone_label = ZONE_LABELS.get(zone, zone)
+            zone_color = ZONE_COLORS.get(zone, "#888780")
             from config import EMOTION_COORDS
             meta = EMOTION_COORDS[current_emotion]
             st.markdown(
@@ -68,8 +73,15 @@ def show():
                         {current_emotion.capitalize()}
                     </div>
                     <div style="font-size:0.85rem; color:#6b7280; margin-top:8px;">
-                        Valence: <b>{V:+.2f}</b><br>
-                        Arousal: <b>{A:+.2f}</b>
+                        Valence: <b>{V:+.2f}</b> &nbsp; Arousal: <b>{A:+.2f}</b>
+                    </div>
+                    <div style="margin-top:10px;">
+                        <span style="
+                            background:{zone_color}22; color:{zone_color};
+                            border:1px solid {zone_color};
+                            font-size:11px; font-weight:700;
+                            padding:3px 10px; border-radius:12px;
+                        ">Zone: {zone_label}</span>
                     </div>
                 </div>
                 """,
