@@ -37,6 +37,12 @@ SELECT nutrient_key, min_value, max_value FROM (
   SELECT 'vitamin_e_mg', MIN(vitamin_e_mg), MAX(vitamin_e_mg)
     FROM food_nutrients WHERE vitamin_e_mg IS NOT NULL
   UNION ALL
+  SELECT 'vitamin_b6_mg', MIN(vitamin_b6_mg), MAX(vitamin_b6_mg)
+    FROM food_nutrients WHERE vitamin_b6_mg IS NOT NULL
+  UNION ALL
+  SELECT 'vitamin_d_mcg', MIN(vitamin_d_mcg), MAX(vitamin_d_mcg)
+    FROM food_nutrients WHERE vitamin_d_mcg IS NOT NULL
+  UNION ALL
   SELECT 'sugar_g', MIN(sugar_g), MAX(sugar_g)
     FROM food_nutrients WHERE sugar_g IS NOT NULL
   UNION ALL

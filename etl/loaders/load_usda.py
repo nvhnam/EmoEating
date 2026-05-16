@@ -42,12 +42,15 @@ COLUMN_MAP = {
     "vitamin_b12":        "vitamin_b12_mcg",
     "folic_acid":         "folate_mcg",
     "tryptophan":         "tryptophan_mg",   # real column — no estimation needed
+    "vitamin_b6":         "vitamin_b6_mg",
+    "vitamin_d":          "vitamin_d_mcg",
 }
 
 MOOD_RELEVANT = [
     "tryptophan_mg", "omega3_mg", "complex_carbs_g", "magnesium_mg",
     "iron_mg", "vitamin_b12_mcg", "folate_mcg", "vitamin_c_mg",
-    "vitamin_e_mg", "sugar_g", "protein_g", "fiber_g", "calories_kcal",
+    "vitamin_e_mg", "vitamin_b6_mg", "vitamin_d_mcg",
+    "sugar_g", "protein_g", "fiber_g", "calories_kcal",
 ]
 
 
@@ -69,7 +72,7 @@ def load(engine, filepath: str, batch_size: int = 500) -> int:
         "fat_g", "saturated_fat_g", "cholesterol_mg", "sodium_mg", "potassium_mg",
         "magnesium_mg", "calcium_mg", "iron_mg", "zinc_mg", "vitamin_a_mcg",
         "vitamin_c_mg", "vitamin_e_mg", "vitamin_b12_mcg", "folate_mcg",
-        "tryptophan_mg",
+        "tryptophan_mg", "vitamin_b6_mg", "vitamin_d_mcg",
     ]
     for col in all_numeric:
         if col in df.columns:
@@ -115,6 +118,7 @@ def load(engine, filepath: str, batch_size: int = 500) -> int:
                     "fiber_g","sugar_g","fat_g","saturated_fat_g",
                     "tryptophan_mg","omega3_mg","magnesium_mg","iron_mg",
                     "vitamin_b12_mcg","folate_mcg","vitamin_c_mg","vitamin_e_mg",
+                    "vitamin_b6_mg","vitamin_d_mcg",
                     "vitamin_a_mcg","calcium_mg","zinc_mg","potassium_mg",
                     "sodium_mg","cholesterol_mg",
                 ]}
@@ -127,6 +131,7 @@ def load(engine, filepath: str, batch_size: int = 500) -> int:
                      fiber_g, sugar_g, fat_g, saturated_fat_g,
                      tryptophan_mg, omega3_mg, magnesium_mg, iron_mg,
                      vitamin_b12_mcg, folate_mcg, vitamin_c_mg, vitamin_e_mg,
+                     vitamin_b6_mg, vitamin_d_mcg,
                      vitamin_a_mcg, calcium_mg, zinc_mg, potassium_mg,
                      sodium_mg, cholesterol_mg, data_completeness)
                     VALUES
@@ -134,6 +139,7 @@ def load(engine, filepath: str, batch_size: int = 500) -> int:
                      :fiber_g, :sugar_g, :fat_g, :saturated_fat_g,
                      :tryptophan_mg, :omega3_mg, :magnesium_mg, :iron_mg,
                      :vitamin_b12_mcg, :folate_mcg, :vitamin_c_mg, :vitamin_e_mg,
+                     :vitamin_b6_mg, :vitamin_d_mcg,
                      :vitamin_a_mcg, :calcium_mg, :zinc_mg, :potassium_mg,
                      :sodium_mg, :cholesterol_mg, :data_completeness)
                 """), nutrient_vals)
