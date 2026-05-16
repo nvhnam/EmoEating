@@ -19,7 +19,7 @@ from components.nutrient_bars import render_nutrient_bars
 from components.meal_card import render_meal_card
 from components.skeleton_loader import inject_shimmer_css, render_restaurant_skeleton
 from components.restaurant_panel import render_restaurant_panel
-from services.location import get_ip_location, geocode_address
+from services.location import get_ip_location, get_browser_location, geocode_address
 from services.restaurant_finder import fetch_restaurants_cached
 from utils.formatting import fmt_kcal
 from config import (
@@ -35,7 +35,7 @@ from config import (
 def _render_location_ui(recs: list) -> None:
     st.markdown("---")
     st.markdown("**📍 Your Location**")
-    st.caption("City-level only · session-scoped · no GPS")
+    st.caption("City-level only · session-scoped · no data stored")
 
     user_loc = st.session_state.get("user_location")
     if user_loc:
@@ -47,19 +47,40 @@ def _render_location_ui(recs: list) -> None:
             st.rerun()
     else:
         if st.button("Auto-detect my location", key="auto_detect_loc"):
-            with st.spinner("Detecting..."):
-                loc = get_ip_location()
+            st.session_state["_geo_request"] = "pending"
+            st.session_state["_geo_attempts"] = 0
+            st.rerun()
+
+        if st.session_state.get("_geo_request") == "pending":
+            with st.spinner("Detecting your location..."):
+                loc = get_browser_location()
             if loc:
                 st.session_state["user_location"] = loc
+                st.session_state.pop("_geo_request", None)
+                st.session_state.pop("_geo_attempts", None)
                 st.rerun()
             else:
-                st.warning("Could not auto-detect. Enter your location below.")
+                attempts = st.session_state.get("_geo_attempts", 0)
+                if attempts < 2:
+                    st.session_state["_geo_attempts"] = attempts + 1
+                    st.info("Detecting your location...")
+                    st.rerun()
+                else:
+                    loc = get_ip_location()
+                    st.session_state.pop("_geo_request", None)
+                    st.session_state.pop("_geo_attempts", None)
+                    if loc:
+                        st.session_state["user_location"] = loc
+                        st.rerun()
+                    else:
+                        st.warning("Could not auto-detect. Enter your location below.")
 
         with st.form("location_form", clear_on_submit=False):
             addr = st.text_input(
                 "Or enter city / address",
-                placeholder="e.g. Ho Chi Minh City",
+                placeholder="e.g. New York, NY · London, UK · Ho Chi Minh City",
             )
+            st.caption("Works for any city worldwide.")
             if st.form_submit_button("Search") and addr.strip():
                 with st.spinner("Geocoding..."):
                     loc = geocode_address(addr.strip(), GOOGLE_PLACES_API_KEY)
@@ -210,6 +231,26 @@ def show():
 
         meal_kcal_target = profile.meal_kcal_target if profile else None
         session_id = st.session_state.get("session_id")
+
+        # Pre-fetch food images in parallel so galleries open instantly
+        _to_fetch_img = [f for f in recs if f"food_images_{f.get('id')}" not in st.session_state]
+        if _to_fetch_img:
+            try:
+                from services.food_images import fetch_food_images
+
+                def _fetch_img(food: dict) -> tuple:
+                    return food.get("id"), fetch_food_images(
+                        food.get("name", ""), food.get("image_url"), 3
+                    )
+
+                with ThreadPoolExecutor(max_workers=min(len(_to_fetch_img), 5)) as _img_ex:
+                    for _img_fut in as_completed(
+                        {_img_ex.submit(_fetch_img, f): f for f in _to_fetch_img}
+                    ):
+                        _fid, _urls = _img_fut.result()
+                        st.session_state[f"food_images_{_fid}"] = _urls
+            except Exception:
+                pass  # gallery components fall back to lazy fetch on expander open
 
         for food in recs:
             ate_it = render_meal_card(
@@ -408,6 +449,7 @@ def _demo_recommendations(emotion: str, need, profile) -> list[dict]:
         food.setdefault("vitamin_c_mg", None)
         food.setdefault("vitamin_b12_mcg", None)
         food.setdefault("ingredients", [])
+        food.setdefault("image_url", None)
 
     return demo_foods
 

@@ -10,3 +10,4 @@ kaggle>=1.6
 tqdm>=4.66
 googlemaps>=4.10.0
 requests>=2.32.0
+streamlit-js-eval>=0.1.7

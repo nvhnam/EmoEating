@@ -12,6 +12,7 @@ sys.path.insert(0, os.path.dirname(os.path.dirname(os.path.abspath(__file__))))
 import html as _html
 
 from utils.formatting import fmt_kcal, fmt_time, fmt_score, kcal_match_pct
+from components.food_image_gallery import render_food_image_gallery
 from config import USE_VN_DATA
 
 
@@ -174,5 +175,11 @@ def render_meal_card(
                 if ingr:
                     st.markdown("**Ingredients**")
                     st.caption(", ".join(str(i) for i in ingr[:20]))
+
+        render_food_image_gallery(
+            food_name=name,
+            food_id=food_id,
+            image_url=food.get("image_url"),
+        )
 
         return ate_it
