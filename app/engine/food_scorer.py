@@ -116,7 +116,7 @@ def micronutrient_coverage(
         rda_day = rda_by_sex[sex_key]
         meal_target = rda_day * meal_fraction
 
-        if val is None:
+        if val is None or float(val) == 0.0:
             missing.append(col)
         else:
             actual = float(val)

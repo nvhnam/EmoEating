@@ -13,7 +13,7 @@ import os
 sys.path.insert(0, os.path.dirname(os.path.dirname(os.path.abspath(__file__))))
 
 from engine.need_vector import NeedVector
-from config import ZONE_EXPLANATIONS, ZONE_LABELS, ZONE_COLORS, NUTRIENT_DISPLAY_LABELS
+from config import ZONE_EXPLANATIONS, ZONE_LABELS, ZONE_COLORS, NUTRIENT_DISPLAY_LABELS, RDA_REFERENCE
 
 _MACRO_COLORS = {
     "carb": "#FAC775",
@@ -81,10 +81,14 @@ def render_macro_targets(need: NeedVector) -> None:
         )
 
 
-def render_micronutrient_info(need: NeedVector) -> None:
+def render_micronutrient_info(
+    need: NeedVector,
+    user_sex: str = "male",
+    meal_fraction: float = 1 / 3,
+) -> None:
     """
-    Render zone explanation and micronutrient priority chips (informational only).
-    These are Stage 5 display items — they have NO effect on ENMS scoring.
+    Render zone explanation and priority micronutrient chips with per-meal RDA targets.
+    Stage 5 display — NO effect on ENMS scoring. Whole-day dietary guidance.
     """
     if not need.micronutrient_priorities:
         return
@@ -94,22 +98,35 @@ def render_micronutrient_info(need: NeedVector) -> None:
         st.caption(explanation)
 
     st.markdown(
-        '<div style="font-size:11px; font-weight:600; color:#6b7280; '
-        'margin: 6px 0 4px 0;">Micronutrient Focus <span style="font-weight:400;">'
-        '(informational)</span></div>',
+        '<div style="font-size:11px; font-weight:600; color:#6b7280; margin:6px 0 2px 0;">'
+        'Dietary Focus for This Zone '
+        '<span style="font-weight:400;">(whole-day guidance · not per-food)</span></div>',
         unsafe_allow_html=True,
     )
 
+    sex_key = "female" if user_sex == "female" else "male"
     chips = ""
     for col in need.micronutrient_priorities:
         label = NUTRIENT_DISPLAY_LABELS.get(col, col)
+        rda_by_sex = RDA_REFERENCE.get(col)
+        if rda_by_sex:
+            rda_meal = rda_by_sex[sex_key] * meal_fraction
+            unit = "µg" if col.endswith("_mcg") else ("g" if col.endswith("_g") else "mg")
+            rda_str = f"{rda_meal:.1f}{unit}/meal"
+        else:
+            rda_str = ""
+        target_html = (
+            f' <span style="font-weight:400; color:#9ca3af;">· {rda_str}</span>'
+            if rda_str else ""
+        )
         chips += (
-            f'<span style="background:#f1f5f9; color:#4b5563; '
-            f'border:1px solid #d1d5db; font-size:10px; padding:2px 7px; '
-            f'border-radius:10px; margin-right:4px; margin-bottom:4px; '
-            f'display:inline-block;">{label}</span>'
+            f'<div style="background:#f1f5f9; color:#4b5563; '
+            f'border:1px solid #d1d5db; font-size:10px; padding:4px 9px; '
+            f'border-radius:8px; margin-right:4px; margin-bottom:5px; '
+            f'display:inline-block; line-height:1.4;">'
+            f'<span style="font-weight:600;">{label}</span>{target_html}</div>'
         )
     st.markdown(
-        f'<div style="line-height:2;">{chips}</div>',
+        f'<div style="margin-top:4px;">{chips}</div>',
         unsafe_allow_html=True,
     )

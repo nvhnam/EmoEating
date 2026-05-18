@@ -25,6 +25,7 @@ from services.restaurant_finder import fetch_restaurants_cached
 from utils.formatting import fmt_kcal
 from config import (
     TOP_K_DEFAULT,
+    MEAL_ENERGY_FRACTION,
     MEAL_TYPE_LABELS,
     ZONE_LABELS,
     ZONE_COLORS,
@@ -139,6 +140,8 @@ def show():
     meal_kcal = meal_energy_target(profile.tdee_kcal, meal_type) if profile else None
     need = compute_need_vector(zone, meal_kcal)
     meta = get_emotion_metadata(emotion)
+    user_sex = profile.sex if profile else "male"
+    meal_fraction = MEAL_ENERGY_FRACTION.get(meal_type.lower(), 1 / 3)
 
     # Run recommendation engine
     if "recommendations" not in st.session_state:
@@ -217,7 +220,7 @@ def show():
         )
 
         render_macro_targets(need)
-        render_micronutrient_info(need)
+        render_micronutrient_info(need, user_sex=user_sex, meal_fraction=meal_fraction)
 
         if profile:
             st.markdown("---")

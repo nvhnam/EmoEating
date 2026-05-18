@@ -127,6 +127,7 @@ RDA_REFERENCE = {
     "vitamin_b12_mcg": {"male": 2.4,   "female": 2.4},
     "vitamin_d_mcg":   {"male": 15.0,  "female": 15.0},
     "iron_mg":         {"male": 8,     "female": 18},
+    "vitamin_e_mg":    {"male": 15,    "female": 15},    # mg/day (NIH ODS DRI 2020)
     "omega3_mg":       {"male": 1600,  "female": 1100},  # AI values (mg/day)
     "fiber_g":         {"male": 38,    "female": 25},    # AI values (g/day)
 }
@@ -136,6 +137,7 @@ NUTRIENT_DISPLAY_LABELS = {
     "magnesium_mg":    "Magnesium",
     "vitamin_b6_mg":   "Vitamin B6",
     "vitamin_c_mg":    "Vitamin C",
+    "vitamin_e_mg":    "Vitamin E",
     "folate_mcg":      "Folate",
     "vitamin_b12_mcg": "Vitamin B12",
     "vitamin_d_mcg":   "Vitamin D",

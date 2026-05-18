@@ -77,25 +77,29 @@ def render_meal_card(
         col_info, col_action = st.columns([4, 1])
 
         with col_info:
-            # Caloric info
-            kcal_str = fmt_kcal(kcal)
-            if meal_kcal_target and kcal:
-                pct = kcal_match_pct(kcal, meal_kcal_target)
-                bar_w = int(pct * 100)
-                st.markdown(
-                    f"""
-                    <div style="margin:4px 0 8px 0;">
-                        <span style="font-size:13px; color:#1a1a2e;">{kcal_str}</span>
-                        <span style="font-size:11px; color:#6b7280;"> / target {fmt_kcal(meal_kcal_target)}</span>
-                        <div style="background:#e2e8f0; border-radius:3px; height:4px; margin-top:4px;">
-                            <div style="width:{bar_w}%; background:#4a90d9; height:100%; border-radius:3px;"></div>
+            # Caloric info — skip entirely when kcal is unavailable (no dash rendered)
+            if kcal:
+                kcal_str = fmt_kcal(kcal)
+                if meal_kcal_target:
+                    pct = kcal_match_pct(kcal, meal_kcal_target)
+                    bar_w = int(pct * 100)
+                    st.markdown(
+                        f"""
+                        <div style="margin:4px 0 8px 0;">
+                            <span style="font-size:13px; color:#1a1a2e;">{kcal_str}</span>
+                            <span style="font-size:11px; color:#6b7280;"> / target {fmt_kcal(meal_kcal_target)}</span>
+                            <div style="background:#e2e8f0; border-radius:3px; height:4px; margin-top:4px;">
+                                <div style="width:{bar_w}%; background:#4a90d9; height:100%; border-radius:3px;"></div>
+                            </div>
                         </div>
-                    </div>
-                    """,
-                    unsafe_allow_html=True,
-                )
-            else:
-                st.markdown(f"**{kcal_str}**")
+                        """,
+                        unsafe_allow_html=True,
+                    )
+                else:
+                    st.markdown(
+                        f'<div style="font-size:13px; color:#1a1a2e; margin-bottom:6px;">{kcal_str}</div>',
+                        unsafe_allow_html=True,
+                    )
 
             # Macro fulfillment chips (actual / target per macro)
             if macro_breakdown:
@@ -151,9 +155,11 @@ def render_meal_card(
                     ("  Sugar",      f"{food.get('sugar_g') or '—'}g"),
                     ("Fiber",        f"{food.get('fiber_g') or '—'}g"),
                     ("Fat",          f"{food.get('fat_g') or '—'}g"),
+                    ("Omega-3",      f"{food.get('omega3_mg') or '—'}mg"),
                     ("Magnesium",    f"{food.get('magnesium_mg') or '—'}mg"),
                     ("Iron",         f"{food.get('iron_mg') or '—'}mg"),
                     ("Vit C",        f"{food.get('vitamin_c_mg') or '—'}mg"),
+                    ("Vit E",        f"{food.get('vitamin_e_mg') or '—'}mg"),
                     ("Vit B6",       f"{food.get('vitamin_b6_mg') or '—'}mg"),
                     ("Vit B12",      f"{food.get('vitamin_b12_mcg') or '—'}µg"),
                     ("Vit D",        f"{food.get('vitamin_d_mcg') or '—'}µg"),
