@@ -14,6 +14,7 @@ def log_recommendation_session(
     recommendations: list[dict],
     V: float,
     A: float,
+    zone: str = "",
     confidence: Optional[float] = None,
     user_id: Optional[int] = None,
     db_conn=None,
@@ -21,19 +22,22 @@ def log_recommendation_session(
     """
     Insert a recommendation_sessions row.
     Returns the new session ID (for later selection logging).
+    Zone is stored as a prefix in detected_emotion for traceability (e.g. "happy|Q1_HAPPY").
     """
     from db.queries import log_session
+
+    detected = f"{emotion}|{zone}" if zone else emotion
 
     session_data = {
         "session_token":     session_token,
         "user_id":           user_id,
-        "detected_emotion":  emotion,
+        "detected_emotion":  detected[:30],
         "emotion_confidence": confidence,
         "emotion_valence":   round(V, 4),
         "emotion_arousal":   round(A, 4),
         "meal_type_filter":  meal_type,
         "recommendations":   [
-            {"food_id": r.get("id"), "score": r.get("final_score"), "rank": r.get("rank")}
+            {"food_id": r.get("id"), "enms": r.get("enms"), "rank": r.get("rank")}
             for r in recommendations
         ],
         "user_selected_id":  None,

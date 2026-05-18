@@ -21,7 +21,8 @@ sys.path.insert(0, str(os.path.dirname(os.path.dirname(os.path.dirname(os.path.a
 MOOD_RELEVANT = [
     "tryptophan_mg", "omega3_mg", "complex_carbs_g", "magnesium_mg",
     "iron_mg", "vitamin_b12_mcg", "folate_mcg", "vitamin_c_mg",
-    "vitamin_e_mg", "sugar_g", "protein_g", "fiber_g", "calories_kcal",
+    "vitamin_e_mg", "vitamin_b6_mg", "vitamin_d_mcg",
+    "sugar_g", "protein_g", "fiber_g", "calories_kcal",
 ]
 
 # Category id → keywords to match against Food_Name_English (case-insensitive).
@@ -153,6 +154,10 @@ def load(engine, filepath: str, batch_size: int = 200) -> int:
                     "folate_mcg":      _safe_float(row.get("Folate_ug")),
                     "vitamin_c_mg":    _safe_float(row.get("Vitamin_C_mg")),
                     "vitamin_e_mg":    _safe_float(row.get("Vitamin_E_mg")),
+                    # Vitamin_B6_mg: mg, direct copy
+                    "vitamin_b6_mg":   _safe_float(row.get("Vitamin_B6_mg")),
+                    # Vitamin_D_ug: ug == mcg, direct copy
+                    "vitamin_d_mcg":   _safe_float(row.get("Vitamin_D_ug")),
                     # Vitamin_A_ug: ug == mcg, direct copy
                     "vitamin_a_mcg":   _safe_float(row.get("Vitamin_A_ug")),
                     "calcium_mg":      _safe_float(row.get("Calcium_mg")),
@@ -174,6 +179,7 @@ def load(engine, filepath: str, batch_size: int = 200) -> int:
                          fiber_g, sugar_g, fat_g, saturated_fat_g,
                          tryptophan_mg, omega3_mg, magnesium_mg, iron_mg,
                          vitamin_b12_mcg, folate_mcg, vitamin_c_mg, vitamin_e_mg,
+                         vitamin_b6_mg, vitamin_d_mcg,
                          vitamin_a_mcg, calcium_mg, zinc_mg, potassium_mg,
                          sodium_mg, cholesterol_mg, data_completeness)
                     VALUES
@@ -181,6 +187,7 @@ def load(engine, filepath: str, batch_size: int = 200) -> int:
                          :fiber_g, :sugar_g, :fat_g, :saturated_fat_g,
                          :tryptophan_mg, :omega3_mg, :magnesium_mg, :iron_mg,
                          :vitamin_b12_mcg, :folate_mcg, :vitamin_c_mg, :vitamin_e_mg,
+                         :vitamin_b6_mg, :vitamin_d_mcg,
                          :vitamin_a_mcg, :calcium_mg, :zinc_mg, :potassium_mg,
                          :sodium_mg, :cholesterol_mg, :data_completeness)
                 """), nutrient_vals)

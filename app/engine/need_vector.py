@@ -1,17 +1,20 @@
-﻿"""
-Computes the nutritional need weight vector N(V, A) from affective coordinates.
-All weights âˆˆ [0, 1]. Research citations embedded as comments.
+"""
+Stage 3: Zone → Nutritional Need Vector (NNV).
 
-References:
-  Wurtman & Wurtman (1995) â€” tryptophan, carbohydrate-serotonin link
-  Grosso et al. (2014) â€” omega-3 and depression
-  Boyle et al. (2017) â€” magnesium and anxiety
-  Kennedy (2016) â€” B vitamins and brain function
-  Lopresti (2020) â€” B vitamins and mitochondrial energy
-  Bouayed et al. (2009) â€” antioxidants and emotional stress
-  Young (2007) â€” tyrosine, dopamine, protein
-  Cryan et al. (2019) â€” gut-brain axis, fiber
-  Gangwisch et al. (2015) â€” glycemic index and depression
+Maps an emotional zone to:
+  - Zone-specific macro percentage ratios (carb/prot/fat) within USDA AMDR bounds
+  - Per-meal macro gram targets computed from the meal energy target
+  - Zone-specific macro weights for ENMS scoring
+  - Informational micronutrient priorities (display only, NOT in ENMS score)
+
+All macro ratios are grounded in cited peer-reviewed research:
+  Wurtman & Wurtman (1995) — carbohydrate → serotonin (Q2, Q3)
+  Benton (2002) — blood glucose → mood stabilization (Q3)
+  Macht (2008) — emotion × eating behaviour model (Q1)
+  Jacka et al. (2017) — Mediterranean diet → mood (Q4)
+  USDA AMDR bounds: carb 45–65%, protein 10–35%, fat 20–35%
+
+See plan/formula_plan.md for full citation list.
 """
 
 from __future__ import annotations
@@ -20,91 +23,78 @@ import sys
 import os
 sys.path.insert(0, os.path.dirname(os.path.dirname(os.path.abspath(__file__))))
 
-from dataclasses import dataclass
+from dataclasses import dataclass, field
+from config import (
+    ZONE_MACRO_RATIOS,
+    ZONE_MACRO_WEIGHTS,
+    ZONE_MICRONUTRIENT_PRIORITIES,
+    DEFAULT_MEAL_KCAL,
+)
 
 
 @dataclass
 class NeedVector:
-    tryptophan: float    # w_trp  â€” serotonin precursor (Wurtman & Wurtman 1995)
-    omega3: float        # w_om3  â€” anti-depressant (Grosso et al. 2014)
-    complex_carbs: float # w_carb â€” serotonin / energy (Wurtman 1995; Gangwisch 2015)
-    magnesium: float     # w_mag  â€” HPA axis / anxiety (Boyle et al. 2017)
-    iron: float          # w_fe   â€” O2 transport / fatigue (Kennedy 2016)
-    b_vitamins: float    # w_bvit â€” brain energy (Kennedy 2016; Lopresti 2020)
-    antioxidants: float  # w_antx â€” oxidative stress (Bouayed et al. 2009)
-    protein: float       # w_prot â€” dopamine precursor (Young 2007)
-    fiber: float         # w_fib  â€” gut-brain axis baseline (Cryan et al. 2019)
-    sugar_penalty: float # p_sug  â€” GI spike penalty (Gangwisch et al. 2015)
+    zone: str
+    meal_kcal: float
+    carb_pct: float
+    prot_pct: float
+    fat_pct: float
+    carb_g: float           # (carb_pct × meal_kcal) / 4 kcal·g⁻¹
+    prot_g: float           # (prot_pct × meal_kcal) / 4 kcal·g⁻¹
+    fat_g: float            # (fat_pct  × meal_kcal) / 9 kcal·g⁻¹
+    macro_weights: dict     # {"carb": float, "prot": float, "fat": float}
+    micronutrient_priorities: list = field(default_factory=list)  # informational only
 
 
-def compute_need_vector(V: float, A: float) -> NeedVector:
+def compute_need_vector(zone: str, meal_kcal: float = None) -> NeedVector:
     """
-    N(V, A) â†’ NeedVector
+    Stage 3: Compute NeedVector from emotional zone and per-meal energy target.
 
-    Let:
-        Vâ» = max(0, âˆ’V)   # negative valence magnitude
-        Aâ» = max(0, âˆ’A)   # low arousal magnitude
-        Aâº = max(0,  A)   # high arousal magnitude
+    carb_g = carb_pct × meal_kcal / 4   (4 kcal per gram of carbohydrate)
+    prot_g = prot_pct × meal_kcal / 4   (4 kcal per gram of protein)
+    fat_g  = fat_pct  × meal_kcal / 9   (9 kcal per gram of fat)
 
-    Formula (all weights clipped to [0,1]):
-        w_trp  = min(1, 1.5 Â· Vâ»)
-        w_om3  = min(1, 1.2 Â· Vâ» Â· (1 âˆ’ 0.4 Â· Aâº))
-        w_carb = min(1, 0.8 Â· Vâ» + 0.4 Â· Aâ»)
-        w_mag  = min(1, 1.4 Â· Aâº Â· Vâ» + 0.3 Â· Vâ»)
-        w_fe   = min(1, 1.3 Â· Aâ» + 0.2 Â· Vâ»)
-        w_bvit = min(1, 1.2 Â· Aâ» + 0.3 Â· Vâ»)
-        w_antx = min(1, 0.7 Â· (1 âˆ’ V) / 2 + 0.3 Â· Aâº)
-        w_prot = min(1, 0.4 + 0.4 Â· Aâº)
-        w_fib  = 0.5   (constant â€” gut-brain axis baseline)
-        p_sug  = min(1, 0.8 Â· Aâº Â· Vâ» + 0.3 Â· Aâº)
+    If meal_kcal is None or ≤ 0, DEFAULT_MEAL_KCAL is used (profile-free fallback).
     """
-    Vm = max(0.0, -V)   # Vâ»
-    Am = max(0.0, -A)   # Aâ»
-    Ap = max(0.0,  A)   # Aâº
+    if not meal_kcal or meal_kcal <= 0:
+        meal_kcal = DEFAULT_MEAL_KCAL
 
-    w_trp  = min(1.0, 1.5 * Vm)
-    w_om3  = min(1.0, 1.2 * Vm * (1.0 - 0.4 * Ap))
-    w_carb = min(1.0, 0.8 * Vm + 0.4 * Am)
-    w_mag  = min(1.0, 1.4 * Ap * Vm + 0.3 * Vm)
-    w_fe   = min(1.0, 1.3 * Am + 0.2 * Vm)
-    w_bvit = min(1.0, 1.2 * Am + 0.3 * Vm)
-    w_antx = min(1.0, 0.7 * (1.0 - V) / 2.0 + 0.3 * Ap)
-    w_prot = min(1.0, 0.4 + 0.4 * Ap)
-    w_fib  = 0.5
-    p_sug  = min(1.0, 0.8 * Ap * Vm + 0.3 * Ap)
+    ratios = ZONE_MACRO_RATIOS[zone]
+    weights = ZONE_MACRO_WEIGHTS[zone]
+    priorities = ZONE_MICRONUTRIENT_PRIORITIES.get(zone, [])
 
     return NeedVector(
-        tryptophan=w_trp,
-        omega3=w_om3,
-        complex_carbs=w_carb,
-        magnesium=w_mag,
-        iron=w_fe,
-        b_vitamins=w_bvit,
-        antioxidants=w_antx,
-        protein=w_prot,
-        fiber=w_fib,
-        sugar_penalty=p_sug,
+        zone=zone,
+        meal_kcal=meal_kcal,
+        carb_pct=ratios["carb"],
+        prot_pct=ratios["prot"],
+        fat_pct=ratios["fat"],
+        carb_g=round(ratios["carb"] * meal_kcal / 4, 1),
+        prot_g=round(ratios["prot"] * meal_kcal / 4, 1),
+        fat_g=round(ratios["fat"]  * meal_kcal / 9, 1),
+        macro_weights=dict(weights),
+        micronutrient_priorities=list(priorities),
     )
 
 
-def need_vector_from_emotion(emotion_label: str) -> NeedVector:
-    """Convenience wrapper: emotion string â†’ NeedVector."""
-    from engine.affect_mapper import emotion_to_va
-    V, A = emotion_to_va(emotion_label)
-    return compute_need_vector(V, A)
+def need_vector_from_emotion(emotion_label: str, meal_kcal: float = None) -> NeedVector:
+    """Convenience: emotion string → zone → NeedVector."""
+    from engine.zone_classifier import zone_from_emotion
+    zone = zone_from_emotion(emotion_label)
+    return compute_need_vector(zone, meal_kcal)
 
 
 def need_vector_to_dict(nv: NeedVector) -> dict:
     """Serialize NeedVector to dict for display/logging."""
     return {
-        "tryptophan":    nv.tryptophan,
-        "omega3":        nv.omega3,
-        "complex_carbs": nv.complex_carbs,
-        "magnesium":     nv.magnesium,
-        "iron":          nv.iron,
-        "b_vitamins":    nv.b_vitamins,
-        "antioxidants":  nv.antioxidants,
-        "protein":       nv.protein,
-        "fiber":         nv.fiber,
-        "sugar_penalty": nv.sugar_penalty,
+        "zone":     nv.zone,
+        "meal_kcal": nv.meal_kcal,
+        "carb_pct": nv.carb_pct,
+        "prot_pct": nv.prot_pct,
+        "fat_pct":  nv.fat_pct,
+        "carb_g":   nv.carb_g,
+        "prot_g":   nv.prot_g,
+        "fat_g":    nv.fat_g,
+        "macro_weights":           nv.macro_weights,
+        "micronutrient_priorities": nv.micronutrient_priorities,
     }

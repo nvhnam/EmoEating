@@ -1,8 +1,14 @@
--- Run this if moodmeal_vn was already initialised before the view was updated
--- to include the description column (needed for Vietnamese name display in UI).
+-- Migration: add vitamin_b6_mg and vitamin_d_mcg to food_nutrients (moodmeal_vn)
+-- Run this against an existing moodmeal_vn DB that was built before this migration.
+-- Safe to run multiple times — MySQL silently errors if columns already exist.
 
 USE moodmeal_vn;
 
+ALTER TABLE food_nutrients
+    ADD COLUMN IF NOT EXISTS vitamin_b6_mg DECIMAL(6,3) NULL AFTER vitamin_e_mg,
+    ADD COLUMN IF NOT EXISTS vitamin_d_mcg DECIMAL(6,3) NULL AFTER vitamin_b6_mg;
+
+-- Refresh the view to include fat_g, vitamin_b6_mg, vitamin_d_mcg
 CREATE OR REPLACE VIEW meals_with_nutrients AS
 SELECT
     f.id,

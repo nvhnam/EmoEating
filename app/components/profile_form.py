@@ -10,7 +10,7 @@ import sys
 import os
 sys.path.insert(0, os.path.dirname(os.path.dirname(os.path.abspath(__file__))))
 
-from engine.physiological import compute_profile, profile_to_dict
+from engine.physiological import compute_profile, profile_to_dict, meal_energy_target
 from utils.formatting import fmt_bmi, bmi_category_color, fmt_kcal
 from utils.validation import validate_profile_inputs
 from config import MEAL_TYPE_LABELS
@@ -31,6 +31,11 @@ def render_profile_form() -> bool:
 
         with col2:
             weight_kg = st.number_input("Weight (kg)", min_value=30.0, max_value=300.0, step=0.5, value=70.0)
+            activity_level = st.selectbox(
+                "Activity level",
+                ["Sedentary", "Lightly Active", "Moderately Active"],
+                help="Sedentary: desk job/little exercise · Lightly Active: light exercise 1–3 days/week · Moderately Active: moderate exercise 3–5 days/week",
+            )
             meal_type = st.selectbox(
                 "Which meal?",
                 list(MEAL_TYPE_LABELS.keys()),
@@ -49,26 +54,29 @@ def render_profile_form() -> bool:
         if sex_key == "prefer_not_to_say":
             sex_key = "other"
 
+        activity_key = activity_level.lower().replace(" ", "_")
+
         errors = validate_profile_inputs(age, sex_key, height_cm, weight_kg)
         if errors:
             for e in errors:
                 st.error(e)
             return False
 
-        profile = compute_profile(age, sex_key, float(height_cm), float(weight_kg))
+        profile = compute_profile(age, sex_key, float(height_cm), float(weight_kg), activity_level=activity_key)
         st.session_state["user_profile"] = profile_to_dict(profile)
         st.session_state["meal_type"] = meal_type
         st.session_state["dietary_restrictions"] = [r.lower().replace("-", "_") for r in restrictions if r != "None"]
 
-        _display_profile_summary(profile)
+        _display_profile_summary(profile, meal_type)
         return True
 
     return False
 
 
-def _display_profile_summary(profile) -> None:
+def _display_profile_summary(profile, meal_type: str = "lunch") -> None:
     """Show compact BMI + caloric target summary after form submission."""
     color = bmi_category_color(profile.bmi_category)
+    meal_target = meal_energy_target(profile.tdee_kcal, meal_type)
     st.markdown(
         f"""
         <div style="
@@ -92,9 +100,15 @@ def _display_profile_summary(profile) -> None:
                     </span>
                 </div>
                 <div>
-                    <span style="font-size:11px; color:#6b7280; display:block;">Estimated meal target</span>
+                    <span style="font-size:11px; color:#6b7280; display:block;">TDEE</span>
+                    <span style="font-size:16px; font-weight:600; color:#1a1a2e;">
+                        {fmt_kcal(profile.tdee_kcal)}/day
+                    </span>
+                </div>
+                <div>
+                    <span style="font-size:11px; color:#6b7280; display:block;">{MEAL_TYPE_LABELS.get(meal_type, meal_type.capitalize())} target</span>
                     <span style="font-size:16px; font-weight:600; color:#4a90d9;">
-                        ~{fmt_kcal(profile.meal_kcal_target)}
+                        ~{fmt_kcal(meal_target)}
                     </span>
                 </div>
             </div>

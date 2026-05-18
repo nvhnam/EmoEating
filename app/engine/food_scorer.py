@@ -1,20 +1,27 @@
 """
-Scores a list of food records from DB against a NeedVector.
-Uses pre-computed normalization_cache from DB.
-All scoring done in-memory after DB fetch — no per-row SQL computation.
+Stage 4: ENMS macro fulfillment scorer.
 
-Scoring formula S(f):
-    n̂ᵢ(f) = (nᵢ(f) − min) / (max − min + ε)
+ENMS(F, Z, U) = α × macro_score(F, Z, U) + (1−α) × pref_score(F, U)
 
-    antox(f)  = 0.6 · n̂_vitC(f) + 0.4 · n̂_vitE(f)
-    bvit(f)   = (n̂_B12(f) + n̂_folate(f)) / 2
+macro_score(F, Z, U) = Σ_{m ∈ {carb, prot, fat}} [
+    w_m^Zone × min( actual_m(F) / target_m(Z, U), 1.0 )
+]
 
-    S(f) = w_trp · n̂_trp + w_om3 · n̂_om3 + w_carb · n̂_carb
-         + w_mag · n̂_mag + w_fe · n̂_fe  + w_bvit · bvit
-         + w_antx · antox + w_prot · n̂_prot + w_fib · n̂_fib
-         − p_sug · n̂_sug
+where:
+  actual_m(F) = portion_adjusted(nutrient_per100g_m, portion_g)
+  target_m(Z, U) = NeedVector gram target for macro m
+  w_m^Zone = zone-specific macro weight (sums to 1.0)
+  min(·, 1.0) caps fulfillment — exceeding target gives no extra credit
 
-    NULL nutrients → treated as 0 (conservative, not imputed)
+Micronutrients: informational display ONLY.
+  - Used in micronutrient_coverage() for UI context ("good source of …")
+  - NULL nutrient fields → skipped silently, NOT penalized
+  - Never affect macro_score or ENMS
+
+Dietary restriction hard filter is applied upstream in get_meals() (SQL).
+
+References: formula_plan.md §4.3–4.5; Mifflin-St Jeor (1990); Russell (1980);
+            NIH ODS DRI 2020 for RDA reference values.
 """
 
 from __future__ import annotations
@@ -24,88 +31,144 @@ import os
 sys.path.insert(0, os.path.dirname(os.path.dirname(os.path.abspath(__file__))))
 
 from engine.need_vector import NeedVector
+from engine.portion import default_portion_g, portion_adjusted
+from config import RDA_REFERENCE, NUTRIENT_DISPLAY_LABELS
 
-EPS = 1e-8
+_MACRO_COLS = {
+    "carb": "carbohydrate_g",
+    "prot": "protein_g",
+    "fat":  "fat_g",
+}
+
+_MACRO_LABELS = {
+    "carb": "Carbs",
+    "prot": "Protein",
+    "fat":  "Fat",
+}
 
 
-def _normalize(value, min_val: float, max_val: float) -> float:
-    """Min-max normalize a single value; returns 0 if NULL or out of range."""
-    if value is None:
-        return 0.0
-    rng = max_val - min_val + EPS
-    return max(0.0, min(1.0, (float(value) - min_val) / rng))
+def macro_score(
+    food: dict,
+    need: NeedVector,
+    portion_g: float,
+) -> tuple[float, dict]:
+    """
+    Compute macro fulfillment score for a single food item.
+
+    Returns:
+      score   : float ∈ [0, 1]
+      breakdown: dict mapping macro → {actual_g, target_g, ratio, contribution, label}
+    """
+    targets = {"carb": need.carb_g, "prot": need.prot_g, "fat": need.fat_g}
+    weights = need.macro_weights
+
+    total = 0.0
+    breakdown = {}
+
+    for macro, col in _MACRO_COLS.items():
+        actual = portion_adjusted(food.get(col), portion_g)
+        target = targets[macro]
+        ratio = min(actual / target, 1.0) if target > 0 else 0.0
+        w = weights[macro]
+        contrib = w * ratio
+        total += contrib
+        breakdown[macro] = {
+            "label":        _MACRO_LABELS[macro],
+            "actual_g":     round(actual, 1),
+            "target_g":     target,
+            "ratio":        round(ratio, 3),
+            "contribution": round(contrib, 4),
+        }
+
+    return round(total, 6), breakdown
 
 
-def _top_contributors(norm_vals: dict, need: NeedVector) -> list[str]:
-    """Return top-3 nutrient names by weighted contribution to score."""
-    contributions = {
-        "Tryptophan":    need.tryptophan    * norm_vals.get("tryptophan_mg", 0),
-        "Omega-3":       need.omega3        * norm_vals.get("omega3_mg", 0),
-        "Complex Carbs": need.complex_carbs * norm_vals.get("complex_carbs_g", 0),
-        "Magnesium":     need.magnesium     * norm_vals.get("magnesium_mg", 0),
-        "Iron":          need.iron          * norm_vals.get("iron_mg", 0),
-        "B Vitamins":    need.b_vitamins    * norm_vals.get("bvit", 0),
-        "Antioxidants":  need.antioxidants  * norm_vals.get("antox", 0),
-        "Protein":       need.protein       * norm_vals.get("protein_g", 0),
-        "Fiber":         need.fiber         * norm_vals.get("fiber_g", 0),
-    }
-    sorted_contribs = sorted(contributions.items(), key=lambda x: x[1], reverse=True)
-    return [name for name, val in sorted_contribs[:3] if val > 0]
+def micronutrient_coverage(
+    food: dict,
+    zone: str,
+    sex: str,
+    meal_fraction: float,
+) -> dict:
+    """
+    INFORMATIONAL ONLY. Compute actual vs per-meal RDA for zone-priority micronutrients.
+
+    NULL fields are silently skipped (not penalized, logged in 'missing').
+    Never used in ENMS calculation.
+
+    Returns:
+      {
+        "covered": [{"nutrient", "label", "actual", "meal_target", "pct_of_meal_target"}, ...],
+        "missing": [nutrient_col, ...]
+      }
+    """
+    from config import ZONE_MICRONUTRIENT_PRIORITIES
+    sex_key = "female" if sex == "female" else "male"
+    priorities = ZONE_MICRONUTRIENT_PRIORITIES.get(zone, [])
+
+    covered = []
+    missing = []
+
+    for col in priorities:
+        rda_by_sex = RDA_REFERENCE.get(col)
+        if rda_by_sex is None:
+            continue
+        val = food.get(col)
+        rda_day = rda_by_sex[sex_key]
+        meal_target = rda_day * meal_fraction
+
+        if val is None or float(val) == 0.0:
+            missing.append(col)
+        else:
+            actual = float(val)
+            pct = round(actual / meal_target * 100, 1) if meal_target > 0 else 0.0
+            covered.append({
+                "nutrient":          col,
+                "label":             NUTRIENT_DISPLAY_LABELS.get(col, col),
+                "actual":            round(actual, 2),
+                "meal_target":       round(meal_target, 3),
+                "pct_of_meal_target": pct,
+            })
+
+    return {"covered": covered, "missing": missing}
 
 
 def score_foods(
     foods: list[dict],
     need: NeedVector,
-    norm_cache: dict,
+    user_sex: str = "male",
+    meal_fraction: float = 0.33,
 ) -> list[dict]:
     """
-    Score each food in-memory against the NeedVector.
+    Score each food against the NeedVector using ENMS macro fulfillment.
 
-    norm_cache format: {nutrient_key: {"min": float, "max": float}}
-    Returns: foods list with added keys 'affective_score', 'top_contributors'
+    Dietary restriction hard filter must be applied upstream (in get_meals).
+
+    Adds to each food dict:
+      portion_g            : float  — portion used for nutrient calculation
+      macro_score          : float  — ∈ [0, 1]
+      macro_breakdown      : dict   — per-macro {actual_g, target_g, ratio, contribution, label}
+      micronutrient_coverage: dict  — {covered: [...], missing: [...]}
+      top_macros           : list   — macro keys sorted by contribution (for UI chips)
     """
-
-    def nc(key: str):
-        entry = norm_cache.get(key, {})
-        return entry.get("min", 0.0), entry.get("max", 1.0)
-
     scored = []
-    for food in foods:
-        # Normalize each nutrient
-        nv = {}
-        nv["tryptophan_mg"]   = _normalize(food.get("tryptophan_mg"),   *nc("tryptophan_mg"))
-        nv["omega3_mg"]       = _normalize(food.get("omega3_mg"),       *nc("omega3_mg"))
-        nv["complex_carbs_g"] = _normalize(food.get("complex_carbs_g"), *nc("complex_carbs_g"))
-        nv["magnesium_mg"]    = _normalize(food.get("magnesium_mg"),    *nc("magnesium_mg"))
-        nv["iron_mg"]         = _normalize(food.get("iron_mg"),         *nc("iron_mg"))
-        nv["protein_g"]       = _normalize(food.get("protein_g"),       *nc("protein_g"))
-        nv["fiber_g"]         = _normalize(food.get("fiber_g"),         *nc("fiber_g"))
-        nv["sugar_g"]         = _normalize(food.get("sugar_g"),         *nc("sugar_g"))
-        # B-vitamin composite
-        b12_n   = _normalize(food.get("vitamin_b12_mcg"), *nc("vitamin_b12_mcg"))
-        folate_n = _normalize(food.get("folate_mcg"),     *nc("folate_mcg"))
-        nv["bvit"] = (b12_n + folate_n) / 2.0
-        # Antioxidant composite
-        vitc_n = _normalize(food.get("vitamin_c_mg"), *nc("vitamin_c_mg"))
-        vite_n = _normalize(food.get("vitamin_e_mg"), *nc("vitamin_e_mg"))
-        nv["antox"] = 0.6 * vitc_n + 0.4 * vite_n
 
-        score = (
-            need.tryptophan    * nv["tryptophan_mg"]
-            + need.omega3        * nv["omega3_mg"]
-            + need.complex_carbs * nv["complex_carbs_g"]
-            + need.magnesium     * nv["magnesium_mg"]
-            + need.iron          * nv["iron_mg"]
-            + need.b_vitamins    * nv["bvit"]
-            + need.antioxidants  * nv["antox"]
-            + need.protein       * nv["protein_g"]
-            + need.fiber         * nv["fiber_g"]
-            - need.sugar_penalty * nv["sugar_g"]
+    for food in foods:
+        portion_g = default_portion_g(food)
+        m_score, breakdown = macro_score(food, need, portion_g)
+        micro_cov = micronutrient_coverage(food, need.zone, user_sex, meal_fraction)
+
+        top_macros = sorted(
+            breakdown.keys(),
+            key=lambda m: breakdown[m]["contribution"],
+            reverse=True,
         )
 
         food_copy = dict(food)
-        food_copy["affective_score"]  = round(score, 6)
-        food_copy["top_contributors"] = _top_contributors(nv, need)
+        food_copy["portion_g"]             = portion_g
+        food_copy["macro_score"]           = m_score
+        food_copy["macro_breakdown"]       = breakdown
+        food_copy["micronutrient_coverage"] = micro_cov
+        food_copy["top_macros"]            = top_macros
         scored.append(food_copy)
 
     return scored

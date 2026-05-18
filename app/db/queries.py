@@ -31,14 +31,13 @@ def get_meals(
     meal_type: str,
     dietary_restrictions: Optional[list[str]] = None,
     min_completeness: int = 5,
-    kcal_min: Optional[float] = None,
-    kcal_max: Optional[float] = None,
     limit: int = 2000,
     db_conn=None,
 ) -> list[dict]:
     """
     Fetch candidate meals from meals_with_nutrients view.
-    Applies dietary filters and caloric range if specified.
+    Applies dietary hard filters (equivalent to ENMS=0 exclusion per formula_plan.md §4.3).
+    No caloric pre-filter — ENMS macro fulfillment scoring handles food ranking.
     Returns up to `limit` rows.
     """
     restrictions = dietary_restrictions or []
@@ -54,12 +53,6 @@ def get_meals(
         "limit":            limit,
     }
 
-    if kcal_min is not None:
-        conditions.append("calories_kcal >= :kcal_min")
-        params["kcal_min"] = kcal_min
-    if kcal_max is not None:
-        conditions.append("calories_kcal <= :kcal_max")
-        params["kcal_max"] = kcal_max
     if "vegetarian" in [r.lower() for r in restrictions]:
         conditions.append("is_vegetarian = 1")
     if "vegan" in [r.lower() for r in restrictions]:
@@ -199,6 +192,11 @@ def upsert_user(session_token: str, profile_data: dict, db_conn=None) -> int:
             dietary_restrictions = VALUES(dietary_restrictions),
             updated_at = CURRENT_TIMESTAMP
     """
+    # meal_kcal_target column kept for DB compat; value not critical (legacy field)
+    meal_kcal_target = profile_data.get("meal_kcal_target")
+    if meal_kcal_target is None and profile_data.get("tdee_kcal"):
+        meal_kcal_target = round(profile_data["tdee_kcal"] * 0.30, 1)  # dinner fraction default
+
     params = {
         "session_token":       session_token,
         "age":                 profile_data.get("age"),
@@ -209,7 +207,7 @@ def upsert_user(session_token: str, profile_data: dict, db_conn=None) -> int:
         "bmi_category":        profile_data.get("bmi_category"),
         "bmr_kcal":            profile_data.get("bmr_kcal"),
         "tdee_kcal":           profile_data.get("tdee_kcal"),
-        "meal_kcal_target":    profile_data.get("meal_kcal_target"),
+        "meal_kcal_target":    meal_kcal_target,
         "dietary_restrictions": json.dumps(profile_data.get("dietary_restrictions", [])),
     }
     conn = _conn(db_conn)

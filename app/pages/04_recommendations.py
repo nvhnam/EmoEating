@@ -13,9 +13,10 @@ from concurrent.futures import ThreadPoolExecutor, as_completed
 sys.path.insert(0, os.path.dirname(os.path.dirname(os.path.abspath(__file__))))
 
 from engine.affect_mapper import emotion_to_va, get_emotion_metadata
+from engine.zone_classifier import classify_zone
 from engine.need_vector import compute_need_vector
-from engine.physiological import PhysiologicalProfile
-from components.nutrient_bars import render_nutrient_bars
+from engine.physiological import PhysiologicalProfile, profile_from_dict, meal_energy_target
+from components.nutrient_bars import render_macro_targets, render_micronutrient_info
 from components.meal_card import render_meal_card
 from components.skeleton_loader import inject_shimmer_css, render_restaurant_skeleton
 from components.restaurant_panel import render_restaurant_panel
@@ -24,7 +25,11 @@ from services.restaurant_finder import fetch_restaurants_cached
 from utils.formatting import fmt_kcal
 from config import (
     TOP_K_DEFAULT,
+    MEAL_ENERGY_FRACTION,
     MEAL_TYPE_LABELS,
+    ZONE_LABELS,
+    ZONE_COLORS,
+    UI_DISCLAIMER,
     GOOGLE_PLACES_API_KEY,
     RESTAURANT_SEARCH_RADIUS_M,
     RESTAURANT_MAX_RESULTS,
@@ -95,8 +100,7 @@ def _get_profile() -> PhysiologicalProfile | None:
     pd = st.session_state.get("user_profile")
     if not pd:
         return None
-    from engine.physiological import PhysiologicalProfile
-    return PhysiologicalProfile(**pd)
+    return profile_from_dict(pd)
 
 
 def show():
@@ -132,8 +136,12 @@ def show():
     confidence = st.session_state.get("emotion_confidence")
 
     V, A = emotion_to_va(emotion)
-    need = compute_need_vector(V, A)
+    zone = classify_zone(V, A)
+    meal_kcal = meal_energy_target(profile.tdee_kcal, meal_type) if profile else None
+    need = compute_need_vector(zone, meal_kcal)
     meta = get_emotion_metadata(emotion)
+    user_sex = profile.sex if profile else "male"
+    meal_fraction = MEAL_ENERGY_FRACTION.get(meal_type.lower(), 1 / 3)
 
     # Run recommendation engine
     if "recommendations" not in st.session_state:
@@ -169,6 +177,7 @@ def show():
                             meal_type=meal_type,
                             recommendations=recs,
                             V=V, A=A,
+                            zone=zone,
                             confidence=confidence,
                         )
                         st.session_state["session_id"] = sid
@@ -210,17 +219,23 @@ def show():
             unsafe_allow_html=True,
         )
 
-        render_nutrient_bars(need)
+        render_macro_targets(need)
+        render_micronutrient_info(need, user_sex=user_sex, meal_fraction=meal_fraction)
 
         if profile:
             st.markdown("---")
             st.markdown("**Physiological Profile**")
+            _target = meal_energy_target(profile.tdee_kcal, meal_type)
             st.caption(
                 f"BMI: {profile.bmi:.1f} ({profile.bmi_category.capitalize()})\n\n"
-                f"Meal target: ~{fmt_kcal(profile.meal_kcal_target)}"
+                f"TDEE: {fmt_kcal(profile.tdee_kcal)}/day\n\n"
+                f"{MEAL_TYPE_LABELS.get(meal_type, meal_type.capitalize())} target: ~{fmt_kcal(_target)}"
             )
 
         _render_location_ui(recs)
+
+        st.markdown("---")
+        st.caption(UI_DISCLAIMER)
 
         st.markdown("---")
         if st.button("← Adjust emotion"):
@@ -256,7 +271,7 @@ def show():
             )
             return
 
-        meal_kcal_target = profile.meal_kcal_target if profile else None
+        meal_kcal_target = meal_energy_target(profile.tdee_kcal, meal_type) if profile else None
         session_id = st.session_state.get("session_id")
 
         # Pre-fetch food images in parallel so galleries open instantly
@@ -413,71 +428,115 @@ def show():
 def _demo_recommendations(emotion: str, need, profile) -> list[dict]:
     """
     Fallback demo results when DB is not connected.
-    Returns synthetic scored meals for UI demonstration.
+    Computes proper ENMS scores against the NeedVector so the UI renders correctly.
     """
-    from config import AFFECTIVE_WEIGHT, CALORIC_WEIGHT
+    from config import ENMS_ALPHA, DEFAULT_PREF_SCORE, TOP_K_DEFAULT
+    from engine.affect_mapper import emotion_to_va
+    from engine.zone_classifier import classify_zone
+
+    V, A = emotion_to_va(emotion)
+    zone = classify_zone(V, A)
+
+    # Macro totals represent a full meal serving (not per-100g)
     demo_foods = [
-        {"id": 1, "name": "Grilled Salmon with Quinoa",       "cuisine": "Mediterranean",
-         "calories_kcal": 520, "protein_g": 38, "complex_carbs_g": 42,
+        {"id": 1, "name": "Grilled Salmon with Quinoa", "cuisine": "Mediterranean",
+         "calories_kcal": 520, "protein_g": 38, "carbohydrate_g": 42, "fat_g": 18,
          "fiber_g": 5, "omega3_mg": 2000, "magnesium_mg": 60,
-         "vitamin_c_mg": 15, "vitamin_b12_mcg": 4.5, "is_vegetarian": False,
-         "is_vegan": False, "is_gluten_free": True, "prep_time_min": 15, "cook_time_min": 20},
+         "vitamin_c_mg": 15, "vitamin_b12_mcg": 4.5, "vitamin_b6_mg": 0.9, "vitamin_d_mcg": 12.0,
+         "is_vegetarian": False, "is_vegan": False, "is_gluten_free": True,
+         "prep_time_min": 15, "cook_time_min": 20},
         {"id": 2, "name": "Lentil Soup with Whole Grain Bread", "cuisine": "Middle Eastern",
-         "calories_kcal": 380, "protein_g": 18, "complex_carbs_g": 55,
+         "calories_kcal": 380, "protein_g": 18, "carbohydrate_g": 55, "fat_g": 8,
          "fiber_g": 12, "magnesium_mg": 75, "iron_mg": 6.5,
-         "vitamin_c_mg": 8, "folate_mcg": 180, "is_vegetarian": True,
-         "is_vegan": True, "is_gluten_free": False, "prep_time_min": 10, "cook_time_min": 30},
-        {"id": 3, "name": "Turkey & Vegetable Stir-fry",       "cuisine": "Asian",
-         "calories_kcal": 450, "protein_g": 35, "complex_carbs_g": 30,
+         "vitamin_c_mg": 8, "folate_mcg": 180, "vitamin_b6_mg": 0.5, "vitamin_d_mcg": None,
+         "is_vegetarian": True, "is_vegan": True, "is_gluten_free": False,
+         "prep_time_min": 10, "cook_time_min": 30},
+        {"id": 3, "name": "Turkey & Vegetable Stir-fry", "cuisine": "Asian",
+         "calories_kcal": 450, "protein_g": 35, "carbohydrate_g": 30, "fat_g": 12,
          "fiber_g": 7, "magnesium_mg": 45, "iron_mg": 3.2,
-         "vitamin_c_mg": 45, "vitamin_b12_mcg": 2.8, "is_vegetarian": False,
-         "is_vegan": False, "is_gluten_free": True, "prep_time_min": 15, "cook_time_min": 15},
-        {"id": 4, "name": "Greek Yogurt Parfait with Berries",  "cuisine": "Western",
-         "calories_kcal": 280, "protein_g": 20, "complex_carbs_g": 35,
-         "fiber_g": 4, "calcium_mg": 300, "vitamin_c_mg": 30,
-         "vitamin_b12_mcg": 1.2, "is_vegetarian": True,
-         "is_vegan": False, "is_gluten_free": True, "prep_time_min": 5, "cook_time_min": 0},
-        {"id": 5, "name": "Black Bean Burrito Bowl",           "cuisine": "Mexican",
-         "calories_kcal": 480, "protein_g": 22, "complex_carbs_g": 60,
-         "fiber_g": 15, "magnesium_mg": 80, "iron_mg": 5.0,
-         "folate_mcg": 200, "vitamin_c_mg": 25, "is_vegetarian": True,
-         "is_vegan": True, "is_gluten_free": True, "prep_time_min": 10, "cook_time_min": 15},
+         "vitamin_c_mg": 45, "vitamin_b12_mcg": 2.8, "vitamin_b6_mg": 1.1, "vitamin_d_mcg": 2.5,
+         "is_vegetarian": False, "is_vegan": False, "is_gluten_free": True,
+         "prep_time_min": 15, "cook_time_min": 15},
     ]
 
-    import random
-    for i, food in enumerate(demo_foods):
-        food["affective_score"] = round(0.75 - i * 0.05 + random.uniform(-0.03, 0.03), 4)
-        food["top_contributors"] = ["Protein", "Magnesium", "B Vitamins"][:3 - (i % 2)]
-        food["caloric_proximity_score"] = None
-        food["final_score"] = food["affective_score"]
-        food["rank"] = i + 1
-        food.setdefault("tryptophan_mg", None)
-        food.setdefault("omega3_mg", None)
-        food.setdefault("vitamin_e_mg", None)
-        food.setdefault("sugar_g", None)
-        food.setdefault("fat_g", None)
-        food.setdefault("serving_size_g", None)
-        food.setdefault("rating", None)
-        food.setdefault("data_completeness", 7)
-        food.setdefault("meal_type", "complete_meal")
-        food.setdefault("category", "dinner")
-        food.setdefault("is_dairy_free", False)
-        food.setdefault("carbohydrate_g", food.get("complex_carbs_g", 0))
-        food.setdefault("saturated_fat_g", None)
-        food.setdefault("prep_time_min", 15)
-        food.setdefault("cook_time_min", 20)
-        food.setdefault("folate_mcg", None)
-        food.setdefault("potassium_mg", None)
-        food.setdefault("sodium_mg", None)
-        food.setdefault("zinc_mg", None)
-        food.setdefault("calcium_mg", None)
-        food.setdefault("magnesium_mg", None)
-        food.setdefault("iron_mg", None)
-        food.setdefault("vitamin_c_mg", None)
-        food.setdefault("vitamin_b12_mcg", None)
-        food.setdefault("ingredients", [])
-        food.setdefault("image_url", None)
+    weights = need.macro_weights
+    targets = {"carb": need.carb_g, "prot": need.prot_g, "fat": need.fat_g}
 
-    return demo_foods
+    for i, food in enumerate(demo_foods):
+        actuals = {
+            "carb": float(food.get("carbohydrate_g") or 0),
+            "prot": float(food.get("protein_g") or 0),
+            "fat":  float(food.get("fat_g") or 0),
+        }
+
+        breakdown = {}
+        m_score = 0.0
+        for macro in ("carb", "prot", "fat"):
+            target = targets[macro]
+            actual = actuals[macro]
+            ratio = min(actual / target, 1.0) if target > 0 else 0.0
+            w = weights[macro]
+            contrib = round(w * ratio, 4)
+            m_score += contrib
+            breakdown[macro] = {
+                "actual_g": round(actual, 1),
+                "target_g": target,
+                "ratio": round(ratio, 3),
+                "contribution": contrib,
+            }
+
+        m_score = round(m_score, 6)
+        enms = round(ENMS_ALPHA * m_score + (1 - ENMS_ALPHA) * DEFAULT_PREF_SCORE, 6)
+
+        top_macros = sorted(
+            ("carb", "prot", "fat"),
+            key=lambda m: breakdown[m]["contribution"],
+            reverse=True,
+        )
+
+        micro_covered = []
+        for col, meal_rda in [("magnesium_mg", 42.0), ("vitamin_c_mg", 9.0),
+                               ("iron_mg", 2.7), ("folate_mcg", 133.0)]:
+            val = food.get(col)
+            if val is not None:
+                micro_covered.append({
+                    "nutrient": col,
+                    "actual": float(val),
+                    "meal_target": meal_rda,
+                    "pct_of_meal_target": round(float(val) / meal_rda * 100, 1),
+                })
+
+        food.update({
+            "macro_score": m_score,
+            "macro_breakdown": breakdown,
+            "micronutrient_coverage": {"covered": micro_covered, "missing": []},
+            "top_macros": top_macros,
+            "enms": enms,
+            "final_score": enms,
+            "pref_score": DEFAULT_PREF_SCORE,
+            "zone": zone,
+            "emotion_V": V,
+            "emotion_A": A,
+            "rank": i + 1,
+            "portion_g": 300.0,
+            "meal_type": "complete_meal",
+            "category": "dinner",
+            "data_completeness": 8,
+            "serving_size_g": 300,
+            "ingredients": [],
+            "image_url": None,
+            "sugar_g": None,
+            "saturated_fat_g": None,
+            "potassium_mg": None,
+            "sodium_mg": None,
+            "zinc_mg": None,
+            "calcium_mg": food.get("calcium_mg"),
+            "rating": None,
+            "is_dairy_free": False,
+            "complex_carbs_g": food.get("carbohydrate_g"),
+        })
+
+    demo_foods.sort(key=lambda f: f["enms"], reverse=True)
+    return demo_foods[:TOP_K_DEFAULT]
 
 show()
