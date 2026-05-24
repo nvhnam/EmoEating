@@ -1,5 +1,16 @@
--- Migration: add self-reported V-A coordinates to recommendation_sessions
--- Required for guide.md Phase 7 zone agreement rate computation.
+-- ============================================================
+-- LEGACY MIGRATION — DO NOT RUN ON A FRESH INSTALL
+-- ============================================================
+-- This migration adds self_reported_v, self_reported_a, self_reported_zone
+-- to recommendation_sessions for guide.md Phase 7 zone agreement analysis.
+--
+-- FRESH INSTALL (schema v2+, 01_schema.sql dated 2026-05-24 or later):
+--   These columns are already in 01_schema.sql. Do NOT run this file.
+--
+-- EXISTING DATABASE (schema built before 2026-05-24):
+--   Run this once to add Phase 7 columns to an old database:
+--   mysql -u root -p moodmeal < data/sql/05_user_study_self_report.sql
+--
 -- Safe to run multiple times (ADD COLUMN IF NOT EXISTS).
 
 USE moodmeal;
