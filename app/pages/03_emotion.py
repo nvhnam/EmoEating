@@ -83,6 +83,52 @@ def _render_voice_panel() -> None:
                 icon=":material/warning:",
             )
 
+        # ── Affect grid (Phase 7 user-study ground truth) ─────────────────────
+        # Participants self-report their V-A position BEFORE voice recording.
+        # Stored as self_reported_v/a/zone in the session log for zone agreement analysis.
+        st.markdown(
+            '<div style="font-size:11px; font-weight:600; color:#6b7280; margin:10px 0 4px 0;">'
+            'Step 1 — Self-Report Your Current Feeling '
+            '<span style="font-weight:400;">(research ground truth)</span></div>',
+            unsafe_allow_html=True,
+        )
+        sr_col_v, sr_col_a = st.columns(2)
+        with sr_col_v:
+            sr_v = st.slider(
+                "Valence (pleasantness)",
+                min_value=-1.0, max_value=1.0, value=0.0, step=0.05,
+                format="%.2f",
+                help="−1 = Very unpleasant · 0 = Neutral · +1 = Very pleasant",
+                key="sr_valence",
+            )
+        with sr_col_a:
+            sr_a = st.slider(
+                "Arousal (energy level)",
+                min_value=-1.0, max_value=1.0, value=0.0, step=0.05,
+                format="%.2f",
+                help="−1 = Very calm/sleepy · 0 = Neutral · +1 = Very alert/active",
+                key="sr_arousal",
+            )
+        from engine.zone_classifier import classify_zone as _cz
+        sr_zone = _cz(sr_v, sr_a)
+        sr_color = ZONE_COLORS.get(sr_zone, "#888780")
+        sr_label = ZONE_LABELS.get(sr_zone, sr_zone)
+        st.markdown(
+            f'<div style="font-size:11px; color:{sr_color}; font-weight:600; margin-bottom:8px;">'
+            f'→ Self-reported zone: <span style="background:{sr_color}22; padding:2px 8px; '
+            f'border-radius:8px; border:1px solid {sr_color};">{sr_label}</span></div>',
+            unsafe_allow_html=True,
+        )
+        st.session_state["self_reported_v"] = sr_v
+        st.session_state["self_reported_a"] = sr_a
+        st.session_state["self_reported_zone"] = sr_zone
+
+        st.markdown(
+            '<div style="font-size:11px; font-weight:600; color:#6b7280; margin:6px 0 4px 0;">'
+            'Step 2 — Record Voice Sample</div>',
+            unsafe_allow_html=True,
+        )
+
         # Audio input — Streamlit ≥1.37 provides st.audio_input()
         audio_val = None
         try:

@@ -105,11 +105,13 @@ def log_session(session_data: dict, db_conn=None) -> int:
         INSERT INTO recommendation_sessions
             (session_token, user_id, detected_emotion, emotion_confidence,
              emotion_valence, emotion_arousal, meal_type_filter,
-             recommendations, user_selected_id)
+             recommendations, user_selected_id,
+             self_reported_v, self_reported_a, self_reported_zone)
         VALUES
             (:session_token, :user_id, :detected_emotion, :emotion_confidence,
              :emotion_valence, :emotion_arousal, :meal_type_filter,
-             :recommendations, :user_selected_id)
+             :recommendations, :user_selected_id,
+             :self_reported_v, :self_reported_a, :self_reported_zone)
     """
     params = {
         "session_token":     session_data.get("session_token", ""),
@@ -121,6 +123,9 @@ def log_session(session_data: dict, db_conn=None) -> int:
         "meal_type_filter":  session_data.get("meal_type_filter"),
         "recommendations":   json.dumps(session_data.get("recommendations", [])),
         "user_selected_id":  session_data.get("user_selected_id"),
+        "self_reported_v":   session_data.get("self_reported_v"),
+        "self_reported_a":   session_data.get("self_reported_a"),
+        "self_reported_zone": session_data.get("self_reported_zone"),
     }
     conn = _conn(db_conn)
     try:

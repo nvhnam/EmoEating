@@ -202,6 +202,9 @@ def show():
                             V=V, A=A,
                             zone=zone,
                             confidence=confidence,
+                            self_reported_v    = st.session_state.get("self_reported_v"),
+                            self_reported_a    = st.session_state.get("self_reported_a"),
+                            self_reported_zone = st.session_state.get("self_reported_zone"),
                         )
                         st.session_state["session_id"] = sid
                     except Exception:
