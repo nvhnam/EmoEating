@@ -22,7 +22,7 @@ def log_recommendation_session(
     """
     Insert a recommendation_sessions row.
     Returns the new session ID (for later selection logging).
-    Zone is stored as a prefix in detected_emotion for traceability (e.g. "happy|Q1_HAPPY").
+    Zone is stored as a prefix in detected_emotion for traceability (e.g. "happy|Q1_POS_ACT").
     """
     from db.queries import log_session
 

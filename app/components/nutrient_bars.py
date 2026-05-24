@@ -99,8 +99,8 @@ def render_micronutrient_info(
 
     st.markdown(
         '<div style="font-size:11px; font-weight:600; color:#6b7280; margin:6px 0 2px 0;">'
-        'Dietary Focus for This Zone '
-        '<span style="font-weight:400;">(whole-day guidance · not per-food)</span></div>',
+        'Zone Priority Micronutrients '
+        '<span style="font-weight:400;">(scored in ENMS β=0.20 component)</span></div>',
         unsafe_allow_html=True,
     )
 
