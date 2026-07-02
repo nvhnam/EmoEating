@@ -1,14 +1,47 @@
-venv/
+# ---- LaTeX build intermediates ----
+paper/build/
+*.aux
+*.bbl
+*.blg
+*.log
+*.out
+*.toc
+*.fls
+*.fdb_latexmk
+*.synctex.gz
+
+# ---- Python (backend) ----
 __pycache__/
-*.pyc
-*.pyo
+*.py[cod]
+.venv/
+venv/
+env/
+*.egg-info/
+.pytest_cache/
+.mypy_cache/
+.ruff_cache/
+
+# ---- Node / SvelteKit (frontend) ----
+node_modules/
+frontend/.svelte-kit/
+frontend/build/
+frontend/.env*
+dist/
+
+# ---- Models & data (large; not committed) ----
+backend/emoeating/data/store/
+models/
+*.pt
+*.bin
+*.onnx
+
+# ---- Secrets ----
 .env
-data/raw/
-data/processed/
-*.zip
-*.tsv
-*.csv
-!data/sql/
-.streamlit/secrets.toml
-.claude
-plan
+.env.*
+!.env.example
+
+# ---- OS / editor ----
+.DS_Store
+Thumbs.db
+.vscode/
+.idea/

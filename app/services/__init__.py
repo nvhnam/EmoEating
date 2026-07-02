@@ -1,1 +1,0 @@
-# MoodMeal services package
