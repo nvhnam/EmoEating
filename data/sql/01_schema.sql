@@ -1,5 +1,5 @@
 -- ============================================================
--- MoodMeal Research Database Schema
+-- EmoEating Research Database Schema
 -- Engine: MySQL 8.0+  Charset: utf8mb4
 -- ============================================================
 

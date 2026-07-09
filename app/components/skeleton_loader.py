@@ -1,6 +1,12 @@
 from __future__ import annotations
 
+import sys
+import os
+sys.path.insert(0, os.path.dirname(os.path.dirname(os.path.abspath(__file__))))
+
 import streamlit as st
+
+from utils.icons import icon
 
 SHIMMER_CSS = """
 <style>
@@ -9,15 +15,15 @@ SHIMMER_CSS = """
     100% { background-position:  400px 0; }
 }
 .skeleton-shimmer {
-    background: linear-gradient(90deg, #f0f0f0 25%, #e0e8f0 50%, #f0f0f0 75%);
+    background: linear-gradient(90deg, var(--border) 25%, var(--brand-tint) 50%, var(--border) 75%);
     background-size: 800px 100%;
     animation: shimmer 1.4s ease-in-out infinite;
     border-radius: 4px;
 }
 .skeleton-panel {
-    background: #ffffff; border: 1px solid #e2e8f0;
-    border-radius: 8px; padding: 12px 16px; margin-top: 6px;
-    box-shadow: 0 1px 2px rgba(0,0,0,0.04);
+    background: var(--card); border: 1px solid var(--border);
+    border-radius: var(--radius-md); padding: 12px 16px; margin-top: 6px;
+    box-shadow: var(--shadow-sm);
 }
 </style>
 """
@@ -37,7 +43,7 @@ def render_restaurant_skeleton(n_rows: int = 3) -> str:
     )
     return (
         '<div class="skeleton-panel">'
-        "<span style=\"font-size:11px; color:#9ca3af;\">📍 Finding nearby restaurants...</span>"
+        f'<span style="font-size:11px; color:var(--muted);">{icon("location", 11)} Finding nearby restaurants...</span>'
         f"{bars}"
         "</div>"
     )

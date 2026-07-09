@@ -1,5 +1,5 @@
 -- ============================================================
--- MoodMeal Vietnamese Research Database Schema
+-- EmoEating Vietnamese Research Database Schema
 -- Schema: moodmeal_vn (identical structure to moodmeal)
 -- Engine: MySQL 8.0+  Charset: utf8mb4
 -- ============================================================

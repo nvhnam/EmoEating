@@ -1,95 +1,192 @@
-/* MoodMeal — Custom CSS overrides */
+/* EmoEating — design system
+   Tokens (:root vars) and the Google Fonts @import are injected by
+   app/main.py via app/theme.py::build_root_css() BEFORE this file loads,
+   so every var(--token) below and in component inline styles resolves
+   against app/theme.py's PALETTE — the single source of truth. */
 
-/* Import Inter & JetBrains Mono */
-@import url('https://fonts.googleapis.com/css2?family=Inter:wght@400;600;700;800&family=JetBrains+Mono:wght@400;500&display=swap');
-
-:root {
-    --primary:  #1a1a2e;
-    --accent:   #4a90d9;
-    --surface:  #f8f9fa;
-    --card:     #ffffff;
-    --border:   #e2e8f0;
-    --success:  #2d9e5a;
-    --warning:  #e6a817;
-    --muted:    #6b7280;
-}
-
-/* Typography */
+/* ── Base typography ─────────────────────────────────────────────────────── */
 html, body, [class*="css"] {
-    font-family: 'Inter', system-ui, -apple-system, sans-serif;
-    color: var(--primary);
+    font-family: var(--font-body);
+    color: var(--ink);
+    font-size: 15px;
 }
 
 h1, h2, h3, h4 {
-    font-family: 'Inter', sans-serif;
-    font-weight: 700;
-    color: var(--primary);
+    font-family: var(--font-display);
+    font-weight: 600;
+    color: var(--ink);
+    letter-spacing: -0.01em;
 }
 
-/* Streamlit overrides */
+h1 { font-size: clamp(1.75rem, 1.4rem + 1.5vw, 2.5rem); font-weight: 700; }
+h2 { font-size: clamp(1.3rem, 1.1rem + 0.8vw, 1.75rem); }
+h3 { font-size: 1.125rem; }
+
+p, li, span, label, div { font-family: var(--font-body); }
+
+code, pre {
+    font-family: var(--font-mono);
+}
+
+/* ── App shell ────────────────────────────────────────────────────────────── */
 .stApp {
     background-color: var(--surface);
 }
 
-/* Hide hamburger menu and footer */
 #MainMenu { visibility: hidden; }
 footer    { visibility: hidden; }
 
-/* Max width container */
-.main .block-container {
-    max-width: 1100px;
+section[data-testid="stSidebar"] {
+    display: none;
+}
+
+/* Fluid, responsive main container */
+.main .block-container,
+[data-testid="stMainBlockContainer"] {
+    max-width: min(1100px, 100%);
     padding-left: 2rem;
     padding-right: 2rem;
+    padding-top: 2.5rem;
 }
 
-/* Buttons */
+@media (max-width: 640px) {
+    .main .block-container,
+    [data-testid="stMainBlockContainer"] {
+        padding-left: 1rem;
+        padding-right: 1rem;
+        padding-top: 1.5rem;
+    }
+}
+
+/* ── Buttons ──────────────────────────────────────────────────────────────── */
+.stButton > button {
+    border-radius: var(--radius-sm);
+    font-family: var(--font-body);
+    font-weight: 600;
+    font-size: 0.9rem;
+    min-height: 44px;
+    transition: background var(--motion-base) var(--motion-ease),
+                border-color var(--motion-base) var(--motion-ease),
+                transform var(--motion-fast) var(--motion-ease);
+}
+
 .stButton > button[kind="primary"] {
-    background-color: var(--accent);
+    background-color: var(--brand);
     color: #ffffff;
     border: none;
-    border-radius: 6px;
-    font-weight: 600;
-    transition: background 0.2s;
 }
 .stButton > button[kind="primary"]:hover {
-    background-color: #3a7bc8;
+    background-color: var(--brand-hover);
 }
 
-/* Cards */
+.stButton > button[kind="secondary"]:hover {
+    border-color: var(--brand);
+    color: var(--brand);
+}
+
+/* ── Cards ────────────────────────────────────────────────────────────────── */
 .meal-card {
     background: var(--card);
     border: 1px solid var(--border);
-    border-radius: 8px;
-    padding: 16px;
-    margin-bottom: 12px;
-    box-shadow: 0 1px 3px rgba(0, 0, 0, 0.06);
+    border-radius: var(--radius-md);
+    padding: var(--space-4);
+    margin-bottom: var(--space-3);
+    box-shadow: var(--shadow-sm);
+    transition: box-shadow var(--motion-base) var(--motion-ease),
+                transform var(--motion-base) var(--motion-ease);
+}
+.meal-card:hover {
+    box-shadow: var(--shadow-md);
+    transform: translateY(-2px);
 }
 
-/* Expander styling */
-.streamlit-expanderHeader {
+/* ── Expander ─────────────────────────────────────────────────────────────── */
+.streamlit-expanderHeader,
+[data-testid="stExpander"] summary {
+    font-family: var(--font-display);
     font-weight: 600;
-    color: var(--primary);
+    color: var(--ink);
+}
+[data-testid="stExpander"] {
+    border-radius: var(--radius-md);
+    border-color: var(--border);
 }
 
-/* Plotly chart container */
+/* ── Tabs ─────────────────────────────────────────────────────────────────── */
+[data-testid="stTabs"] button[role="tab"] {
+    font-family: var(--font-display);
+    font-weight: 600;
+    font-size: 0.9rem;
+}
+[data-testid="stTabs"] button[aria-selected="true"] {
+    color: var(--brand);
+}
+
+/* ── Plotly chart container ──────────────────────────────────────────────── */
 .js-plotly-plot {
-    border-radius: 8px;
+    border-radius: var(--radius-md);
     overflow: hidden;
 }
 
-/* Monospace for formulas */
-code, pre {
-    font-family: 'JetBrains Mono', 'Fira Code', monospace;
+/* ── Responsive column stacking (base mechanism) ─────────────────────────────
+   Streamlit's st.columns() does not reflow on narrow viewports by default —
+   this stacks every horizontal block to one column under 640px. Pages/
+   components that need different mobile behavior wrap their st.columns()
+   call in `st.container(key="...")` and are overridden below by that
+   `.st-key-*` class, which — appearing later in the cascade at equal
+   !important specificity — wins over this base rule. */
+@media (max-width: 640px) {
+    [data-testid="stHorizontalBlock"] {
+        flex-direction: column;
+    }
+    [data-testid="stHorizontalBlock"] [data-testid="stColumn"] {
+        width: 100% !important;
+        flex: 1 1 100% !important;
+        min-width: 100% !important;
+    }
 }
 
-/* Emotion button grid */
-.stButton > button {
-    border-radius: 8px;
-    font-size: 0.85rem;
-    min-height: 70px;
+/* ── Emotion grid (components/emotion_selector.py) ───────────────────────────
+   11 buttons render as 3 separate st.columns(5) rows; instead of stacking to
+   a very tall single column, let each row wrap its buttons into a 2-up (
+   mobile) / 3-up (tablet) flow so the grid stays compact and scannable. */
+@media (max-width: 640px) {
+    .st-key-emotion-grid [data-testid="stHorizontalBlock"] {
+        flex-direction: row !important;
+        flex-wrap: wrap !important;
+        gap: 8px !important;
+    }
+    .st-key-emotion-grid [data-testid="stHorizontalBlock"] [data-testid="stColumn"] {
+        width: calc(50% - 4px) !important;
+        flex: 1 1 calc(50% - 4px) !important;
+        min-width: calc(50% - 4px) !important;
+    }
+}
+@media (min-width: 641px) and (max-width: 1024px) {
+    .st-key-emotion-grid [data-testid="stHorizontalBlock"] [data-testid="stColumn"] {
+        flex: 1 1 calc(33.333% - 8px) !important;
+        min-width: calc(33.333% - 8px) !important;
+    }
 }
 
-/* Sidebar hidden during user study */
-section[data-testid="stSidebar"] {
-    display: none;
+/* ── Recommendations context/cards split (pages/04_recommendations.py) ──────
+   On mobile, naively stacking the [3,7] context|cards split buries the
+   actual meal recommendations under the (long) context panel. Reorder so
+   the meal cards render first and the context panel follows. Scoped to the
+   outer split only (`> [stLayoutWrapper] > [stHorizontalBlock]`) so nested
+   st.columns() inside meal cards / expanders are unaffected. */
+@media (max-width: 640px) {
+    .st-key-reco-split > [data-testid="stLayoutWrapper"] > [data-testid="stHorizontalBlock"] > [data-testid="stColumn"]:nth-of-type(1) {
+        order: 2;
+    }
+    .st-key-reco-split > [data-testid="stLayoutWrapper"] > [data-testid="stHorizontalBlock"] > [data-testid="stColumn"]:nth-of-type(2) {
+        order: 1;
+    }
+}
+
+/* ── Misc responsive polish ──────────────────────────────────────────────── */
+@media (max-width: 640px) {
+    .js-plotly-plot {
+        width: 100% !important;
+    }
 }

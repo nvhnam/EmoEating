@@ -155,7 +155,7 @@ def _print_report(metrics: dict, out_json: str | None = None) -> None:
 
     col = 18
     print("\n" + "=" * 70)
-    print("ZONE AGREEMENT RATE ANALYSIS  —  MoodMeal UIST 2026 (guide.md §7.2)")
+    print("ZONE AGREEMENT RATE ANALYSIS  —  EmoEating UIST 2026 (guide.md §7.2)")
     print("=" * 70)
     n   = metrics["n_sessions"]
     k   = metrics["n_agreed"]
@@ -204,7 +204,7 @@ def _print_report(metrics: dict, out_json: str | None = None) -> None:
 
 def main() -> None:
     parser = argparse.ArgumentParser(
-        description="Zone agreement rate analysis for MoodMeal user study (guide.md §7.2)"
+        description="Zone agreement rate analysis for EmoEating user study (guide.md §7.2)"
     )
     parser.add_argument(
         "--env", default=None,

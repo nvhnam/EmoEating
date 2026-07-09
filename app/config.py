@@ -3,23 +3,34 @@ from __future__ import annotations
 import os
 from dotenv import load_dotenv
 
+from theme import ZONE_PALETTE, MACRO_COLORS
+
 load_dotenv()
 
 # ── Emotion → (Valence, Arousal) mapping — Russell Circumplex (1980) ─────────
 # UI manual-selection emotions. VA coordinates used for zone classification
 # and circumplex visualisation. SER path bypasses this table (direct zone lookup).
+#
+# "color" is each emotion's zone accent (app/theme.py::ZONE_PALETTE), NOT a
+# per-emotion hue — every emotion in the same zone shares one color so the
+# zone stays visually traceable across pages (selector → circumplex → recs
+# context panel → methodology tables). The face icon (app/utils/icons.py)
+# is what visually distinguishes emotions within a zone.
+# Zone assignment mirrors engine/zone_classifier.py::classify_zone exactly:
+#   magnitude<THETA_NEUTRAL -> NEUTRAL_BASELINE; V<=0,A>=0 -> Q2_NEG_ACT;
+#   V<=0,A<0 -> Q3_NEG_DEACT; V>0,A>=0 -> Q1_POS_ACT; V>0,A<0 -> NEUTRAL_BASELINE.
 EMOTION_COORDS = {
-    "happy":    {"V":  0.80, "A":  0.60, "emoji": "😊", "color": "#FAC775"},
-    "excited":  {"V":  0.70, "A":  0.85, "emoji": "🤩", "color": "#F09595"},
-    "content":  {"V":  0.70, "A": -0.30, "emoji": "🙂", "color": "#5DCAA5"},
-    "calm":     {"V":  0.65, "A": -0.55, "emoji": "😌", "color": "#1D9E75"},
-    "neutral":  {"V":  0.00, "A":  0.00, "emoji": "😐", "color": "#888780"},
-    "bored":    {"V": -0.20, "A": -0.70, "emoji": "😒", "color": "#B4B2A9"},
-    "tired":    {"V": -0.30, "A": -0.80, "emoji": "😴", "color": "#6B6B67"},
-    "sad":      {"V": -0.70, "A": -0.55, "emoji": "😢", "color": "#85B7EB"},
-    "anxious":  {"V": -0.55, "A":  0.65, "emoji": "😰", "color": "#AFA9EC"},
-    "stressed": {"V": -0.60, "A":  0.70, "emoji": "😤", "color": "#F0997B"},
-    "angry":    {"V": -0.80, "A":  0.80, "emoji": "😠", "color": "#E24B4A"},
+    "happy":    {"V":  0.80, "A":  0.60, "emoji": "😊", "color": ZONE_PALETTE["Q1_POS_ACT"]["accent"]},
+    "excited":  {"V":  0.70, "A":  0.85, "emoji": "🤩", "color": ZONE_PALETTE["Q1_POS_ACT"]["accent"]},
+    "content":  {"V":  0.70, "A": -0.30, "emoji": "🙂", "color": ZONE_PALETTE["NEUTRAL_BASELINE"]["accent"]},
+    "calm":     {"V":  0.65, "A": -0.55, "emoji": "😌", "color": ZONE_PALETTE["NEUTRAL_BASELINE"]["accent"]},
+    "neutral":  {"V":  0.00, "A":  0.00, "emoji": "😐", "color": ZONE_PALETTE["NEUTRAL_BASELINE"]["accent"]},
+    "bored":    {"V": -0.20, "A": -0.70, "emoji": "😒", "color": ZONE_PALETTE["Q3_NEG_DEACT"]["accent"]},
+    "tired":    {"V": -0.30, "A": -0.80, "emoji": "😴", "color": ZONE_PALETTE["Q3_NEG_DEACT"]["accent"]},
+    "sad":      {"V": -0.70, "A": -0.55, "emoji": "😢", "color": ZONE_PALETTE["Q3_NEG_DEACT"]["accent"]},
+    "anxious":  {"V": -0.55, "A":  0.65, "emoji": "😰", "color": ZONE_PALETTE["Q2_NEG_ACT"]["accent"]},
+    "stressed": {"V": -0.60, "A":  0.70, "emoji": "😤", "color": ZONE_PALETTE["Q2_NEG_ACT"]["accent"]},
+    "angry":    {"V": -0.80, "A":  0.80, "emoji": "😠", "color": ZONE_PALETTE["Q2_NEG_ACT"]["accent"]},
 }
 
 # ── ENMS scoring weights (3-component hybrid formula) ────────────────────────
@@ -33,6 +44,7 @@ DEFAULT_PREF_SCORE = 0.5   # neutral prior; no user interaction history yet
 
 # Minimum data completeness to include food in scoring
 MIN_DATA_COMPLETENESS = 5
+NUTRIENT_NULL = False  # False → exclude foods missing ANY zone-required micronutrient; True → no filter
 
 # ── Stage 1: Physiological ────────────────────────────────────────────────────
 # Mifflin-St Jeor (1990) activity multipliers — USDA DGA 2020-2025
@@ -63,22 +75,30 @@ ZONE_LABELS = {
     "Q3_NEG_DEACT":     "Negative Deactivation",  # tired, sad, bored — −V, −A
     "NEUTRAL_BASELINE": "Neutral Baseline",        # neutral, calm, content
 }
-ZONE_COLORS = {
-    "Q1_POS_ACT":       "#FAC775",   # warm amber
-    "Q2_NEG_ACT":       "#F0997B",   # stressed orange-red
-    "Q3_NEG_DEACT":     "#85B7EB",   # cool blue — fatigued/low
-    "NEUTRAL_BASELINE": "#888780",   # neutral grey
-}
+# Legacy single-hex-per-zone contract (existing call sites use ZONE_COLORS[zone]
+# as a plain string) — sourced from ZONE_PALETTE's accent step. Components that
+# need the AA-legible text color or a panel tint should use ZONE_PALETTE directly.
+ZONE_COLORS = {zone: ramp["accent"] for zone, ramp in ZONE_PALETTE.items()}
 
-# ── SER (Phase 1) — emotion2vec_plus_large → zone lookup ─────────────────────
-# FunASR AutoModel inference: 16 kHz mono WAV → 9-class softmax → argmax → zone.
+# ── SER (Phase 1 & 7) — emotion2vec_plus_large → zone lookup ─────────────────
+# FunASR AutoModel inference: 16 kHz mono WAV → class softmax → zone.
 # Ma et al. (2024), Findings of ACL 2024. DOI: 10.18653/v1/2024.findings-acl.931
+#
+# Backend selection:
+#   "original"    — 9-class off-the-shelf (Phase 1 baseline)
+#   "crema4class" — CREMA-D 4-class linear probe (Phase 7; val WA=92.9%, CCC=0.83)
+SER_BACKEND  = "crema4class"
 SER_MODEL_ID = "iic/emotion2vec_plus_large"
+
+# ── Backend A: original 9-class ───────────────────────────────────────────────
 SER_EMOTION_CLASSES = [
     "angry", "disgusted", "fearful", "happy",
     "neutral", "other", "sad", "surprised", "unknown",
 ]
 # Canonical 4-zone lookup — single source of truth per guide.md Phase 2 & 6.
+# Zone is selected by marginalising the full class distribution over this
+# table (per-zone probability mass, max-mass zone wins), not by taking the
+# argmax class first — see _ser_original.py::predict_zone_from_audio.
 SER_EMOTION_TO_ZONE: dict[str, str] = {
     "happy":     "Q1_POS_ACT",
     "surprised": "Q1_POS_ACT",
@@ -89,6 +109,29 @@ SER_EMOTION_TO_ZONE: dict[str, str] = {
     "neutral":   "NEUTRAL_BASELINE",
     "other":     "NEUTRAL_BASELINE",
     "unknown":   "NEUTRAL_BASELINE",
+}
+
+# ── Backend B: CREMA-D 4-class linear probe ───────────────────────────────────
+# Probe files are resolved relative to app/ in _ser_crema.py (not configurable
+# here to avoid path-dependency drift; change _APP_DIR in _ser_crema.py if needed).
+# Label names match linear_probe_config.json.
+CREMA_LABEL_NAMES: list[str] = ["anger", "happy", "sad_fearful", "neutral"]
+# CREMA probe zone strings → system canonical zone names
+CREMA_PROBE_ZONE_TO_SYSTEM: dict[str, str] = {
+    "pos_active":   "Q1_POS_ACT",
+    "neg_active":   "Q2_NEG_ACT",
+    "neg_deactive": "Q3_NEG_DEACT",
+    "neutral":      "NEUTRAL_BASELINE",
+}
+# Documentation-only: CREMA_LABEL_NAMES[i] → system zone, mirroring the
+# index→zone mapping _ser_crema.py's _PROBE_ZONE_TO_SYSTEM applies internally.
+# Not imported by _ser_crema.py itself (kept private there); used by the
+# methodology page for the class→zone table shown to reviewers.
+CREMA_CLASS_TO_ZONE: dict[str, str] = {
+    "anger":       "Q2_NEG_ACT",
+    "happy":       "Q1_POS_ACT",
+    "sad_fearful": "Q3_NEG_DEACT",
+    "neutral":     "NEUTRAL_BASELINE",
 }
 
 # ── Stage 3: Zone → Macro ratios (within USDA AMDR bounds) ──────────────────
@@ -118,6 +161,23 @@ DEFAULT_PORTIONS_G = {
     "soup": 250, "stew": 250, "salad": 200,
 }
 DEFAULT_PORTION_G = 300  # fallback when category not matched
+
+# ── Recommendation blocklist ──────────────────────────────────────────────────
+# Foods with known incorrect nutrient data in the current DB that should be
+# temporarily excluded from all recommendations.
+# Matching is exact and case-insensitive against the food's name field.
+# Remove an entry once its underlying ETL data has been corrected.
+# Known issues:
+#   Butter    — omega3_mg loaded as 9 200 mg/100 g (correct value ≈ 330 mg)
+#   Mayonnaise— omega3_mg loaded as 6 000 mg/100 g (correct value ≈ 500 mg)
+#   Margarine — omega3_mg loaded as 4 000 mg/100 g (correct value ≈ 300 mg)
+# These inflated values cause them to dominate Q3_NEG_DEACT / NEUTRAL_BASELINE
+# primary pools until the omega3 ETL fix (moodmeal_exp pipeline) is applied.
+RECOMMENDATION_BLOCKLIST: list[str] = [
+    "Butter",
+    "Mayonnaise",
+    "Margarine",
+]
 
 # ── Stage 5: Zone-priority micronutrients (scored in ENMS β component) ───────
 # Every zone has |N_Z| ≥ 2 (guide.md Phase 4.2) — no empty priority set.
@@ -187,7 +247,7 @@ NUTRIENT_DISPLAY_LABELS = {
 }
 
 UI_DISCLAIMER = (
-    "MoodMeal provides general meal suggestions based on mood and nutritional patterns. "
+    "EmoEating provides general meal suggestions based on mood and nutritional patterns. "
     "It does not provide medical or clinical dietary advice. "
     "Consult a registered dietitian for personalized health guidance."
 )
@@ -235,3 +295,25 @@ FOOD_IMAGE_COUNT         = 3
 OPENFOODFACTS_SEARCH_URL = "https://world.openfoodfacts.org/cgi/search.pl"
 WIKIPEDIA_API_URL        = "https://en.wikipedia.org/w/api.php"
 WIKIMEDIA_API_URL        = "https://commons.wikimedia.org/w/api.php"
+
+# ── Gemini Live voice check-in ────────────────────────────────────────────────
+# Replaces the RAVDESS voice-read protocol with a short naturalistic conversation.
+# The live conversation (mic capture, Gemini Live WebSocket, agent-voice gate) runs
+# entirely client-side in a custom Streamlit component; the collected user-only
+# audio is classified once at the end via the existing predict_zone_from_audio().
+# Ephemeral token minting (server-side, real key never reaches the browser) is the
+# only piece of this feature that needs Python — see services/gemini_voice.py.
+GEMINI_API_KEY   = os.getenv("GEMINI_API_KEY", "")
+GEMINI_LIVE_MODEL = os.getenv("GEMINI_LIVE_MODEL", "gemini-3.1-flash-live-preview")
+GEMINI_VOICE      = os.getenv("GEMINI_VOICE", "Aoede")
+GEMINI_WS_URL = os.getenv(
+    "GEMINI_WS_URL",
+    "wss://generativelanguage.googleapis.com/ws/"
+    "google.ai.generativelanguage.v1alpha.GenerativeService.BidiGenerateContentConstrained",
+)
+GEMINI_AUTH_TOKENS_URL = "https://generativelanguage.googleapis.com/v1alpha/auth_tokens"
+
+# Conversation termination tuning — end (agent wraps up, then finalize) when EITHER
+# threshold is hit, or the user clicks "Wrap up" manually.
+VOICE_TARGET_SPEECH_S = 50.0   # seconds of detected user speech to collect
+VOICE_TIMEOUT_S       = 100.0  # hard wall-clock cap

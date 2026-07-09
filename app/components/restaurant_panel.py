@@ -1,9 +1,14 @@
 from __future__ import annotations
 
 import html
+import sys
+import os
 from typing import Optional
 
 import streamlit as st
+
+sys.path.insert(0, os.path.dirname(os.path.dirname(os.path.abspath(__file__))))
+from utils.icons import icon
 
 
 def _fmt_distance(distance_m: float) -> str:
@@ -13,19 +18,19 @@ def _fmt_distance(distance_m: float) -> str:
 
 
 def _fmt_price_level(price_level: Optional[int]) -> str:
-    return {0: "", 1: "💲", 2: "💲💲", 3: "💲💲💲", 4: "💲💲💲💲"}.get(price_level, "")
+    return {0: "", 1: icon("dollar", 11), 2: icon("dollar", 11) * 2, 3: icon("dollar", 11) * 3, 4: icon("dollar", 11) * 4}.get(price_level, "")
 
 
 def _open_badge_html(is_open: Optional[bool]) -> str:
     if is_open is True:
         return (
-            '<span style="background:#d1fae5; color:#065f46; font-size:10px; '
-            'padding:2px 7px; border-radius:10px; font-weight:600;">Open</span>'
+            '<span style="background:color-mix(in srgb, var(--success) 15%, white); color:var(--success); font-size:10px; '
+            'padding:2px 7px; border-radius:var(--radius-pill); font-weight:600;">Open</span>'
         )
     if is_open is False:
         return (
-            '<span style="background:#f3f4f6; color:#6b7280; font-size:10px; '
-            'padding:2px 7px; border-radius:10px; font-weight:600;">Closed</span>'
+            '<span style="background:var(--surface); color:var(--muted); font-size:10px; '
+            'padding:2px 7px; border-radius:var(--radius-pill); font-weight:600;">Closed</span>'
         )
     return ""
 
@@ -39,7 +44,7 @@ def render_restaurant_entry(restaurant: dict) -> None:
     price       = _fmt_price_level(restaurant.get("price_level"))
     maps_url    = html.escape(restaurant.get("maps_url", "#"))
     rating      = restaurant.get("rating")
-    rating_str  = f"★ {rating:.1f}" if rating is not None else ""
+    rating_str  = f'{icon("star", 11)} {rating:.1f}' if rating is not None else ""
     source      = restaurant.get("source", "")
 
     _SOURCE_LABELS = {
@@ -50,28 +55,29 @@ def render_restaurant_entry(restaurant: dict) -> None:
     }
     src_display = _SOURCE_LABELS.get(source, "")
     osm_attr = (
-        f'<div style="font-size:9px; color:#9ca3af; margin-top:4px;">Via {src_display}</div>'
+        f'<div style="font-size:9px; color:var(--muted); margin-top:4px;">Via {src_display}</div>'
         if src_display else ""
     )
 
     card_html = (
-        '<div style="background:#ffffff; border:1px solid #e2e8f0; border-radius:8px; '
-        'padding:10px 14px; margin:4px 0; box-shadow:0 1px 2px rgba(0,0,0,0.04);">'
+        '<div style="background:var(--card); border:1px solid var(--border); border-radius:var(--radius-md); '
+        'padding:10px 14px; margin:4px 0; box-shadow:var(--shadow-sm);">'
         # Row 1: name + distance badge + open badge
         '<div style="display:flex; justify-content:space-between; align-items:center;">'
-        f'<span style="font-size:13px; font-weight:700; color:#1a1a2e;">{name}</span>'
+        f'<span style="font-size:13px; font-weight:700; color:var(--ink);">{name}</span>'
         '<span>'
-        f'<span style="background:#e8f0fb; color:#4a90d9; font-size:10px; '
-        f'padding:2px 8px; border-radius:10px; font-weight:600; margin-right:4px;">{dist_badge}</span>'
+        f'<span style="background:var(--brand-tint); color:var(--brand); font-size:10px; '
+        f'padding:2px 8px; border-radius:var(--radius-pill); font-weight:600; margin-right:4px;">'
+        f'{icon("location", 10)} {dist_badge}</span>'
         f'{open_badge}'
         '</span>'
         '</div>'
         # Row 2: rating + price
-        f'<div style="font-size:11px; color:#6b7280; margin-top:3px;">{rating_str} {price}</div>'
+        f'<div style="font-size:11px; color:var(--muted); margin-top:3px;">{rating_str} {price}</div>'
         # Row 3: address + maps link
         '<div style="display:flex; justify-content:space-between; align-items:center; margin-top:4px;">'
-        f'<span style="font-size:11px; color:#6b7280;">{address}</span>'
-        f'<a href="{maps_url}" target="_blank" style="color:#4a90d9; font-size:11px; '
+        f'<span style="font-size:11px; color:var(--muted);">{address}</span>'
+        f'<a href="{maps_url}" target="_blank" style="color:var(--brand); font-size:11px; '
         f'text-decoration:none; font-weight:600; white-space:nowrap;">View on Maps →</a>'
         '</div>'
         f'{osm_attr}'
@@ -87,7 +93,7 @@ def render_restaurant_panel(
     session_id=None,
     food_id=None,
 ) -> None:
-    with st.expander("📍 Find it near you", expanded=(rank == 1)):
+    with st.expander("Find it near you", icon=":material/location_on:", expanded=(rank == 1)):
         status      = fetch_result.get("status") if fetch_result else "no_key"
         restaurants = fetch_result.get("restaurants", []) if fetch_result else []
 
@@ -105,7 +111,7 @@ def render_restaurant_panel(
             for r in restaurants:
                 render_restaurant_entry(r)
                 st.markdown(
-                    "<hr style='margin:6px 0; border:none; border-top:1px solid #e2e8f0;'>",
+                    "<hr style='margin:6px 0; border:none; border-top:1px solid var(--border);'>",
                     unsafe_allow_html=True,
                 )
 
@@ -125,7 +131,7 @@ def render_restaurant_panel(
             st.info(
                 "Add GOOGLE_PLACES_API_KEY to .env to enable restaurant discovery. "
                 "OpenStreetMap fallback may return limited results in some regions.",
-                icon="🗺️",
+                icon=":material/map:",
             )
 
         elif status == "error":

@@ -1,0 +1,64 @@
+<!DOCTYPE html>
+<html>
+<head>
+<meta charset="utf-8" />
+<title>Voice check-in</title>
+<link rel="preconnect" href="https://fonts.googleapis.com">
+<link href="https://fonts.googleapis.com/css2?family=IBM+Plex+Sans:wght@400;500;600&display=swap" rel="stylesheet">
+<style>
+  /* Isolated iframe document — cannot read the parent app's CSS custom
+     properties, so app/theme.py's palette is hardcoded here as a literal
+     copy. Keep in sync with app/theme.py::PALETTE if the brand color changes. */
+  * { box-sizing: border-box; }
+  body {
+    font-family: 'IBM Plex Sans', -apple-system, BlinkMacSystemFont, "Segoe UI", sans-serif;
+    margin: 0;
+    padding: 12px 14px;
+    color: #211B34;
+  }
+  #status { font-size: 13px; margin-bottom: 10px; min-height: 18px; }
+  #progressOuter {
+    background: #EAE6DF;
+    border-radius: 8px;
+    height: 8px;
+    width: 100%;
+    overflow: hidden;
+    margin-bottom: 6px;
+  }
+  #progressBar { background: #544AA8; height: 100%; width: 0%; transition: width 0.3s ease; }
+  .meta { font-size: 11px; color: #6C6879; margin-bottom: 10px; }
+  .row { display: flex; gap: 10px; align-items: center; flex-wrap: wrap; }
+  button {
+    padding: 7px 16px;
+    border-radius: 8px;
+    border: 1px solid #544AA8;
+    background: #544AA8;
+    color: white;
+    cursor: pointer;
+    font-family: 'IBM Plex Sans', sans-serif;
+    font-weight: 600;
+    font-size: 13px;
+    min-height: 36px;
+    transition: background 0.2s ease;
+  }
+  button:hover:not(:disabled) { background: #43397F; border-color: #43397F; }
+  button:disabled { opacity: 0.5; cursor: not-allowed; }
+  button.secondary { background: white; color: #544AA8; }
+  button.secondary:hover:not(:disabled) { background: #ECEAF7; }
+</style>
+</head>
+<body>
+  <div id="status">Ready.</div>
+  <div id="progressOuter"><div id="progressBar"></div></div>
+  <div class="meta">
+    Speech collected: <span id="speechSeconds">0s</span>
+    &nbsp;|&nbsp; Elapsed: <span id="elapsedSeconds">0s</span>
+    &nbsp;|&nbsp; <span id="gateState">Idle</span>
+  </div>
+  <div class="row">
+    <button id="startBtn">Start voice check-in</button>
+    <button id="wrapUpBtn" class="secondary" disabled>Wrap up</button>
+  </div>
+  <script src="./main.js"></script>
+</body>
+</html>

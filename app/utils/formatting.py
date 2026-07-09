@@ -2,6 +2,12 @@
 
 from __future__ import annotations
 
+import sys
+import os
+sys.path.insert(0, os.path.dirname(os.path.dirname(os.path.abspath(__file__))))
+
+from theme import BMI_STATUS_COLORS
+
 _DASH = "–"  # en dash, used as a placeholder when a value is None
 
 
@@ -56,13 +62,5 @@ def kcal_match_pct(food_kcal, target_kcal) -> float:
     return min(ratio, 1.0 / ratio)
 
 
-BMI_CATEGORY_COLORS = {
-    "underweight": "#85B7EB",
-    "normal":      "#2d9e5a",
-    "overweight":  "#e6a817",
-    "obese":       "#E24B4A",
-}
-
-
 def bmi_category_color(category: str) -> str:
-    return BMI_CATEGORY_COLORS.get(category, "#888780")
+    return BMI_STATUS_COLORS.get(category, "#6A6960")

@@ -13,21 +13,23 @@ sys.path.insert(0, os.path.dirname(os.path.dirname(os.path.abspath(__file__))))
 
 import pandas as pd
 from config import (
-    EMOTION_COORDS, ZONE_LABELS, ZONE_COLORS,
+    EMOTION_COORDS, ZONE_LABELS, ZONE_PALETTE,
     ZONE_MACRO_RATIOS, ZONE_MACRO_WEIGHTS,
     ZONE_MICRONUTRIENT_PRIORITIES, RDA_REFERENCE,
     NUTRIENT_DISPLAY_LABELS, MEAL_ENERGY_FRACTION,
     DEFAULT_MEAL_KCAL, THETA_NEUTRAL,
     ENMS_MACRO_ALPHA, ENMS_MICRO_BETA,
     DEFAULT_PREF_SCORE, TOP_K_DEFAULT,
-    SER_MODEL_ID, SER_EMOTION_TO_ZONE,
+    SER_MODEL_ID, SER_BACKEND, CREMA_CLASS_TO_ZONE,
+    VOICE_TARGET_SPEECH_S, VOICE_TIMEOUT_S,
 )
+from components.pipeline_stepper import render_pipeline_stepper
 
 
 def show():
     st.title("Methodology")
     st.markdown(
-        "This page documents the computational pipeline underpinning MoodMeal's "
+        "This page documents the computational pipeline underpinning EmoEating's "
         "recommendations for research transparency and reviewer access. "
         "The system implements the **Emotion-Nutrition Matching Score (ENMS)** pipeline "
         "grounded in peer-reviewed nutritional neuroscience and affective computing research."
@@ -40,47 +42,105 @@ def show():
         icon=":material/science:",
     )
 
-    # ── Stage 1 — SER ────────────────────────────────────────────────────────
-    with st.expander("Stage 1 — Speech Emotion Recognition (SER)", expanded=True):
+    render_pipeline_stepper()
+
+    tab_ser, tab_zones, tab_need, tab_enms, tab_data = st.tabs([
+        "Speech Emotion Recognition",
+        "Affective Zones",
+        "Nutritional Need",
+        "ENMS Scoring",
+        "Data & References",
+    ])
+
+    # ── Tab 1 — Speech Emotion Recognition ──────────────────────────────────
+    with tab_ser:
         st.markdown(
-            f"Voice emotion detection uses **`{SER_MODEL_ID}`** off-the-shelf via FunASR "
-            f"`AutoModel` (no fine-tuning, no ensembling — guide.md Phase 1). "
-            f"Single-pass inference: 16 kHz mono WAV → 9-class softmax → argmax → zone lookup."
-        )
-        st.markdown(
-            "**Why emotion2vec_plus_large:**\n"
-            "- Published in **Findings of ACL 2024** (peer-reviewed top-tier NLP venue).\n"
-            "- Fine-tuned on **42,526 hours** of pseudo-labelled emotion speech.\n"
-            "- Documented cross-lingual generalisation across 10 languages."
+            "Voice emotion is *collected* via a short, naturalistic spoken check-in "
+            "with a live voice agent, then *classified* in a single batch call — the "
+            "conversation changes how audio is collected, not how it is classified."
         )
 
-        ser_rows = [(emo.capitalize(), ZONE_LABELS.get(z, z), z)
-                    for emo, z in SER_EMOTION_TO_ZONE.items()]
-        df_ser = pd.DataFrame(ser_rows, columns=["SER Emotion Class", "Zone Label", "Zone ID"])
+        st.markdown("**Collection — live conversational elicitation.**")
+        st.markdown(
+            f"A voice agent (Gemini Live) opens with a warm greeting and asks about "
+            f"the user's day, following up with short, open-ended questions until "
+            f"either **{VOICE_TARGET_SPEECH_S:.0f} s of user speech** has been "
+            f"collected or a **{VOICE_TIMEOUT_S:.0f} s** wall-clock cap is reached. "
+            f"The agent's system instruction explicitly forbids naming or suggesting "
+            f"an emotion and forbids discussing food or nutrition, so the elicitation "
+            f"itself cannot bias the signal it is meant to measure. Only the user's "
+            f"audio is retained: a client-side gate mutes capture the instant the "
+            f"agent's own audio starts playing, and reopens only once that audio has "
+            f"actually finished playing — not merely when the network message "
+            f"announcing it arrives — so the agent's voice never reaches the "
+            f"classifier. This replaces an earlier protocol that asked users to read "
+            f"a fixed RAVDESS sentence twice; naturalistic speech is a closer match to "
+            f"how emotion is actually expressed than a scripted reading, at the cost "
+            f"of the RAVDESS corpus's studio-controlled comparability."
+        )
+
+        st.markdown("**Classification — unchanged from Phase 1/7: one batch call.**")
+        st.markdown(
+            f"Once the conversation ends, the full collected user-only audio is "
+            f"passed once through **`{SER_MODEL_ID}`** (Ma et al., Findings of ACL "
+            f"2024) via FunASR `AutoModel` — exactly the same call the prior "
+            f"RAVDESS-based flow used. The default backend (`{SER_BACKEND}`) extracts "
+            f"a 1024-d utterance embedding (`extract_embedding=True`) and classifies "
+            f"it with a linear probe fine-tuned on CREMA-D (4-class: anger · happy · "
+            f"sad/fearful · neutral; best-seed validation weighted accuracy = 92.9%, "
+            f"valence CCC = 0.83). An off-the-shelf 9-class backend (`original`, "
+            f"Phase 1 baseline, no fine-tuning) remains available as a "
+            f"runtime-swappable alternative for comparison. Either way, the zone is "
+            f"assigned by **marginalising the full class distribution** over the "
+            f"class→zone table below — summing per-zone probability mass and taking "
+            f"the max-mass zone — rather than taking the single highest-probability "
+            f"class first."
+        )
+
+        ser_rows = [(cls.replace("_", "/").capitalize(), ZONE_LABELS.get(z, z), z)
+                    for cls, z in CREMA_CLASS_TO_ZONE.items()]
+        df_ser = pd.DataFrame(ser_rows, columns=["CREMA-D Class", "Zone Label", "Zone ID"])
         st.dataframe(df_ser, hide_index=True, use_container_width=True)
 
         st.markdown(
-            "The SER module returns **both the assigned zone AND the raw 9-class probability "
-            "vector** for confusion-matrix reporting and low-confidence-case analysis (§7.1). "
-            "Manual emotion selection (11-emotion grid) is also available as a fallback."
+            "**Why emotion2vec_plus_large:**\n"
+            "- Published in **Findings of ACL 2024** (peer-reviewed top-tier NLP venue).\n"
+            "- Pre-trained on **42,526 hours** of pseudo-labelled emotion speech.\n"
+            "- Documented cross-lingual generalisation across 10 languages."
         )
+        st.markdown(
+            "The SER module returns **both the assigned zone AND the raw class "
+            "probability vector** for confusion-matrix reporting and "
+            "low-confidence-case analysis (§7.1). Manual emotion selection "
+            "(11-emotion grid) is also available as a fallback."
+        )
+
+        st.markdown(
+            "**Safety.** A live spoken check-in about one's day can surface distress "
+            "the elicitation didn't ask for, so two independent, non-blocking layers "
+            "apply: (1) the agent's own system instruction asks it to acknowledge "
+            "crisis language warmly and surface the 988 Suicide & Crisis Lifeline in "
+            "the moment, independent of any SER output; (2) after classification, a "
+            "strongly negative result (Q2_NEG_ACT / Q3_NEG_DEACT at ≥ 40% top-class "
+            "confidence) surfaces the same 988 resource alongside — never instead "
+            "of — the normal recommendation flow."
+        )
+
         st.caption(
             "Ma, Z., et al. (2024). emotion2vec: Self-Supervised Pre-Training for Speech Emotion "
             "Representation. *Findings of ACL 2024*, 15747–15760. "
-            "DOI: 10.18653/v1/2024.findings-acl.931\n\n"
-            "User-study prompt: RAVDESS standardised sentences "
-            "(\"Kids are talking by the door.\"), read twice. "
-            "Livingstone & Russo (2018). *PLOS ONE*, 13(5), e0196391. "
-            "DOI: 10.1371/journal.pone.0196391"
+            "DOI: 10.18653/v1/2024.findings-acl.931"
         )
 
-    # ── Stage 2 — Dimensional Affect Mapping ─────────────────────────────────
-    with st.expander("Stage 2 — Dimensional Affect Mapping (Russell Circumplex)", expanded=True):
+    # ── Tab 2 — Affective Zones (dimensional mapping + classification) ─────
+    with tab_zones:
         st.markdown(
             "For the manual-selection path, each emotion label maps to a **(Valence, Arousal)** "
             "coordinate pair using the Russell Circumplex Model of Affect (1980). "
             "Valence ∈ [−1, +1] represents hedonic tone; Arousal ∈ [−1, +1] represents activation. "
-            "The SER path bypasses this table — zone is assigned directly from the 9-class lookup."
+            "The SER path bypasses this table — zone is assigned directly from the class→zone lookup "
+            "in the Speech Emotion Recognition tab (marginalised class-probability mass, not this "
+            "VA coordinate mapping)."
         )
         st.latex(r"\text{emotion} \xrightarrow{\text{Table}} (V,\, A) \in [-1,\, 1]^2")
 
@@ -99,8 +159,8 @@ def show():
             "DOI: 10.1017/S0954579405050340"
         )
 
-    # ── Stage 2b — Zone Classification ───────────────────────────────────────
-    with st.expander("Stage 2b — Emotional Zone Classification (4-zone model)", expanded=True):
+        st.divider()
+
         st.markdown(
             f"The (V, A) point is classified into one of **4 emotional zones** (guide.md Phase 2). "
             f"A neutral dead-zone threshold θ = **{THETA_NEUTRAL}** is applied: "
@@ -138,14 +198,14 @@ def show():
         if demo_emo_z:
             _V, _A = emotion_to_va(demo_emo_z)
             _zone  = classify_zone(_V, _A)
-            _color = ZONE_COLORS.get(_zone, "#888780")
+            _ramp  = ZONE_PALETTE.get(_zone, ZONE_PALETTE["NEUTRAL_BASELINE"])
             _label = ZONE_LABELS.get(_zone, _zone)
             st.markdown(
-                f'<span style="background:{_color}22; color:{_color}; '
-                f'border:1px solid {_color}; font-size:12px; font-weight:700; '
-                f'padding:4px 12px; border-radius:12px;">'
+                f'<span style="background:{_ramp["tint"]}; color:{_ramp["core"]}; '
+                f'border:1px solid {_ramp["core"]}; font-size:12px; font-weight:700; '
+                f'padding:4px 12px; border-radius:var(--radius-pill);">'
                 f'Zone: {_label}</span> '
-                f'<span style="font-size:11px; color:#6b7280; margin-left:8px;">'
+                f'<span style="font-size:11px; color:var(--muted); margin-left:8px;">'
                 f'V={_V:+.2f}, A={_A:+.2f}</span>',
                 unsafe_allow_html=True,
             )
@@ -155,8 +215,8 @@ def show():
             "self-reported emotion validation set. See guide.md Phase 2."
         )
 
-    # ── Stage 3 — Physiological / TDEE ───────────────────────────────────────
-    with st.expander("Stage 1b — Physiological Profile Adaptation (TDEE)", expanded=False):
+    # ── Tab 3 — Nutritional Need (TDEE + NNV) ───────────────────────────────
+    with tab_need:
         st.markdown("**Mifflin-St Jeor BMR equation (1990) — current clinical standard:**")
         st.latex(
             r"\text{BMR}_{\text{male}} = 10w + 6.25h - 5a + 5 \quad [\text{kcal/day}]"
@@ -187,8 +247,8 @@ def show():
             "USDA (2020). *Dietary Guidelines for Americans 2020–2025*, 9th Edition."
         )
 
-    # ── Stage 3 — NNV ─────────────────────────────────────────────────────────
-    with st.expander("Stage 3 — Nutritional Need Vector (NNV)", expanded=True):
+        st.divider()
+
         st.markdown(
             "Each zone maps to a **macro-nutrient ratio profile** within USDA AMDR bounds "
             "(carb 45–65%, protein 10–35%, fat 20–35%). "
@@ -244,8 +304,8 @@ def show():
             _need = compute_need_vector(_zn, _kcal)
             render_macro_targets(_need)
 
-    # ── Stage 4 — ENMS Scoring ─────────────────────────────────────────────────
-    with st.expander("Stage 4 — ENMS Hybrid Scoring (3-Component)", expanded=True):
+    # ── Tab 4 — ENMS Scoring (macro + micro components) ────────────────────
+    with tab_enms:
         st.markdown(
             "The **Emotion-Nutrition Matching Score (ENMS)** is the system's design "
             "contribution. It blends three components into a computable food ranking:"
@@ -315,13 +375,14 @@ def show():
             f"**ENMS range:** [{_lo}, {_hi}] when pref_score = {DEFAULT_PREF_SCORE} (neutral prior)."
         )
 
-    # ── Stage 5 — Zone-Priority Micronutrients ────────────────────────────────
-    with st.expander("Stage 5 — Zone-Priority Micronutrient Scoring (N_Z)", expanded=False):
+        st.divider()
+
         st.markdown(
-            "Zone-priority micronutrients are **scored in the β=0.20 component** of ENMS. "
-            "Every zone now has |N_Z| ≥ 2 (guide.md Phase 4.2) — no zone has an empty set. "
-            "Focused lists create stronger discrimination signal; each list reflects the "
-            "neurochemical mechanism most relevant to that emotional state."
+            "**Zone-priority micronutrients** are the |N_Z| set scored in the β=0.20 "
+            "component above. Every zone has |N_Z| ≥ 2 (guide.md Phase 4.2) — no zone "
+            "has an empty set. Focused lists create stronger discrimination signal; "
+            "each list reflects the neurochemical mechanism most relevant to that "
+            "emotional state."
         )
         st.info(
             "**Data coverage note:** USDA micronutrient records are 30–60% complete. "
@@ -371,8 +432,9 @@ def show():
             "Gómez-Pinilla (2008) — brain foods."
         )
 
-    # ── Appendix — Meal Database ──────────────────────────────────────────────
-    with st.expander("Appendix — Meal Database", expanded=False):
+    # ── Tab 5 — Data & References ───────────────────────────────────────────
+    with tab_data:
+        st.markdown("**Appendix — Meal Database**")
         st.markdown(
             "The meal corpus is assembled from five publicly available datasets:\n\n"
             "| Source | Dataset | Approx. Size |\n"
@@ -395,8 +457,9 @@ def show():
         except Exception:
             st.caption("Database not connected — corpus statistics unavailable.")
 
-    # ── Full Reference List ───────────────────────────────────────────────────
-    with st.expander("Full Reference List", expanded=False):
+        st.divider()
+
+        st.markdown("**Full Reference List**")
         refs = [
             "Ma, Z., et al. (2024). emotion2vec: Self-Supervised Pre-Training for Speech Emotion Representation. *Findings of ACL 2024*, 15747–15760. DOI: 10.18653/v1/2024.findings-acl.931",
             "Russell, J. A. (1980). A circumplex model of affect. *Journal of Personality and Social Psychology*, 39(6), 1161–1178. DOI: 10.1037/h0077714",

@@ -189,7 +189,7 @@ def _print_report(metrics: dict, out_json: str | None = None) -> None:
     col  = 18   # column width
 
     print("\n" + "=" * 70)
-    print("RAVDESS SER BENCHMARK  —  MoodMeal UIST 2026 (guide.md §7.1)")
+    print("RAVDESS SER BENCHMARK  —  EmoEating UIST 2026 (guide.md §7.1)")
     print("Model: emotion2vec_plus_large (Ma et al., ACL 2024)")
     print("=" * 70)
     print(f"Files evaluated : {metrics['n_total']}")
@@ -233,7 +233,7 @@ def _print_report(metrics: dict, out_json: str | None = None) -> None:
 
 def main() -> None:
     parser = argparse.ArgumentParser(
-        description="RAVDESS SER benchmark for MoodMeal (guide.md Phase 7.1)"
+        description="RAVDESS SER benchmark for EmoEating (guide.md Phase 7.1)"
     )
     parser.add_argument(
         "--ravdess-dir", required=True,

@@ -27,12 +27,14 @@ from components.restaurant_panel import render_restaurant_panel
 from services.location import get_ip_location, get_browser_location, geocode_address
 from services.restaurant_finder import fetch_restaurants_cached
 from utils.formatting import fmt_kcal
+from utils.icons import icon, emotion_icon
 from config import (
     TOP_K_DEFAULT,
     MEAL_ENERGY_FRACTION,
     MEAL_TYPE_LABELS,
     ZONE_LABELS,
     ZONE_COLORS,
+    ZONE_PALETTE,
     UI_DISCLAIMER,
     GOOGLE_PLACES_API_KEY,
     RESTAURANT_SEARCH_RADIUS_M,
@@ -43,12 +45,16 @@ from config import (
 
 def _render_location_ui(recs: list) -> None:
     st.markdown("---")
-    st.markdown("**📍 Your Location**")
+    st.markdown(
+        f'<div style="display:flex; align-items:center; gap:6px; font-weight:600; font-size:14px; color:var(--ink); margin-bottom:2px;">'
+        f'{icon("location", 15)} Your Location</div>',
+        unsafe_allow_html=True,
+    )
     st.caption("City-level only · session-scoped · no data stored")
 
     user_loc = st.session_state.get("user_location")
     if user_loc:
-        st.success(f"📌 {user_loc['label']}")
+        st.success(user_loc["label"], icon=":material/location_on:")
         if st.button("Change location", key="clear_location"):
             del st.session_state["user_location"]
             for food in recs:
@@ -136,18 +142,24 @@ def show():
             st.switch_page("pages/03_emotion.py")
         return
 
+    # Read profile inputs before the cache guard so meal_type is available for comparison
+    meal_type           = st.session_state.get("meal_type", "dinner")
+    dietary_restrictions = st.session_state.get("dietary_restrictions", [])
+
     # ── Stale-cache eviction ─────────────────────────────────────────────────
-    _cached_reco_emotion = st.session_state.get("_reco_emotion")
-    if "recommendations" in st.session_state and _cached_reco_emotion != emotion:
+    _cached_reco_emotion   = st.session_state.get("_reco_emotion")
+    _cached_reco_meal_type = st.session_state.get("_reco_meal_type")
+    if "recommendations" in st.session_state and (
+        _cached_reco_emotion != emotion or _cached_reco_meal_type != meal_type
+    ):
         st.session_state.pop("recommendations", None)
         st.session_state.pop("_reco_emotion", None)
+        st.session_state.pop("_reco_meal_type", None)
         st.session_state.pop("session_id", None)
         for _k in [k for k in st.session_state
                    if k.startswith(("food_images_", "restaurants_"))]:
             del st.session_state[_k]
 
-    meal_type           = st.session_state.get("meal_type", "dinner")
-    dietary_restrictions = st.session_state.get("dietary_restrictions", [])
     profile             = _get_profile()
     session_token       = st.session_state.get("session_token", "anonymous")
     confidence          = st.session_state.get("emotion_confidence")
@@ -163,7 +175,7 @@ def show():
     try:
         meta = get_emotion_metadata(emotion)
     except ValueError:
-        meta = {"emoji": "🎙️", "color": ZONE_COLORS.get(zone, "#888780")}
+        meta = {"color": ZONE_COLORS.get(zone, ZONE_PALETTE["NEUTRAL_BASELINE"]["accent"])}
 
     # ── Run recommendation engine ─────────────────────────────────────────────
     if "recommendations" not in st.session_state:
@@ -185,11 +197,24 @@ def show():
                     zone=ser_zone,   # None → VA-based; set → SER bypass
                 )
                 if not recs:
-                    st.info(
-                        "No meal data loaded yet — showing demo results. "
-                        "Run the ETL pipeline to populate real recommendations.",
-                        icon=":material/info:",
-                    )
+                    from config import NUTRIENT_NULL, ZONE_MICRONUTRIENT_PRIORITIES, NUTRIENT_DISPLAY_LABELS
+                    _zone_micros = ZONE_MICRONUTRIENT_PRIORITIES.get(zone, [])
+                    _micro_labels = [NUTRIENT_DISPLAY_LABELS.get(c, c) for c in _zone_micros]
+                    if not NUTRIENT_NULL and _micro_labels:
+                        st.info(
+                            f"No complete-meal foods in the database have all zone-priority "
+                            f"micronutrients populated ({', '.join(_micro_labels)}) for zone **{zone}**. "
+                            f"Showing demo results. "
+                            f"Set `NUTRIENT_NULL = True` in config.py to score foods with partial data, "
+                            f"or run the full ETL pipeline with a dataset that includes these nutrients.",
+                            icon=":material/info:",
+                        )
+                    else:
+                        st.info(
+                            "No meal data loaded yet — showing demo results. "
+                            "Run the ETL pipeline to populate real recommendations.",
+                            icon=":material/info:",
+                        )
                     recs = _demo_recommendations(emotion, zone, need, profile, meal_fraction)
                 else:
                     try:
@@ -217,27 +242,34 @@ def show():
                 )
                 recs = _demo_recommendations(emotion, zone, need, profile, meal_fraction)
 
-        st.session_state["recommendations"] = recs
-        st.session_state["_reco_emotion"] = emotion
+        st.session_state["recommendations"]  = recs
+        st.session_state["_reco_emotion"]    = emotion
+        st.session_state["_reco_meal_type"]  = meal_type
 
     recs = st.session_state.get("recommendations", [])
 
     # ── Layout ───────────────────────────────────────────────────────────────
-    left, right = st.columns([3, 7])
+    # Wrapped in a keyed container so phase-9 responsive CSS can target this
+    # specific horizontal split (`.st-key-reco-split`) without affecting the
+    # other st.columns() layouts elsewhere on the page.
+    reco_split = st.container(key="reco-split")
+    with reco_split:
+        left, right = st.columns([3, 7])
 
     with left:
-        zone_color = ZONE_COLORS.get(zone, "#888780")
+        ramp = ZONE_PALETTE.get(zone, ZONE_PALETTE["NEUTRAL_BASELINE"])
+        face = emotion_icon(emotion, size=32, color=meta.get("color", ramp["accent"]))
         source_badge = (
-            '<span style="font-size:10px; color:#4a90d9; margin-top:2px;">🎙️ Voice-detected</span>'
+            f'<span style="font-size:10px; color:var(--brand); margin-top:2px;">{icon("mic", 11)} Voice-detected</span>'
             if ser_zone else ""
         )
         st.markdown(
-            f'<div style="background:#ffffff; border:1px solid #e2e8f0; '
-            f'border-radius:8px; padding:16px; margin-bottom:12px;">'
-            f'<div style="font-size:2rem;">{meta["emoji"]}</div>'
-            f'<div style="font-size:1.1rem; font-weight:700; color:#1a1a2e; margin-top:4px;">'
+            f'<div style="background:var(--card); border:1px solid var(--border); '
+            f'border-radius:var(--radius-md); padding:16px; margin-bottom:12px; box-shadow:var(--shadow-sm);">'
+            f'<div>{face}</div>'
+            f'<div style="font-family:var(--font-display); font-size:1.1rem; font-weight:700; color:var(--ink); margin-top:4px;">'
             f'{emotion.capitalize()}</div>'
-            f'<div style="font-size:0.8rem; color:#6b7280; margin-top:2px;">'
+            f'<div style="font-size:0.8rem; color:var(--muted); margin-top:2px;">'
             f'V={V:+.2f}, A={A:+.2f}</div>'
             f'{source_badge}'
             f'</div>',
@@ -264,10 +296,9 @@ def show():
 
         st.markdown("---")
         if st.button("← Adjust emotion"):
-            st.session_state.pop("recommendations", None)
-            st.session_state.pop("_reco_emotion", None)
-            st.session_state.pop("session_id", None)
-            st.session_state.pop("detected_emotion", None)
+            for _k in ("recommendations", "_reco_emotion", "_reco_meal_type",
+                       "session_id", "detected_emotion", "ser_zone", "ser_probs"):
+                st.session_state.pop(_k, None)
             for _k in [k for k in st.session_state
                        if k.startswith(("food_images_", "restaurants_"))]:
                 del st.session_state[_k]
@@ -277,8 +308,8 @@ def show():
         meal_label = MEAL_TYPE_LABELS.get(meal_type, meal_type.capitalize())
         st.markdown(
             f"## Recommended for you "
-            f'<span style="background:#e8f0fb; color:#4a90d9; '
-            f'font-size:0.8rem; padding:3px 10px; border-radius:12px;">'
+            f'<span style="background:var(--brand-tint); color:var(--brand); '
+            f'font-size:0.8rem; padding:3px 10px; border-radius:var(--radius-pill);">'
             f'{meal_label}</span>',
             unsafe_allow_html=True,
         )
@@ -336,7 +367,10 @@ def show():
         if user_location:
             inject_shimmer_css()
             st.markdown("---")
-            st.markdown("### 🗺️ Find these dishes near you")
+            st.markdown(
+                f'<h3 style="display:flex; align-items:center; gap:8px;">{icon("map", 20)} Find these dishes near you</h3>',
+                unsafe_allow_html=True,
+            )
             st.caption(
                 f"Showing restaurants within "
                 f"**{RESTAURANT_SEARCH_RADIUS_M // 1000} km** of "
@@ -370,7 +404,7 @@ def show():
                 fid   = food.get("id")
                 label = _restaurant_label(food)[:80]
                 st.markdown(
-                    f'<div style="font-size:13px; font-weight:600; color:#1a1a2e; '
+                    f'<div style="font-size:13px; font-weight:600; color:var(--ink); '
                     f'margin:10px 0 2px 0;">{html.escape(label)}</div>',
                     unsafe_allow_html=True,
                 )
@@ -428,9 +462,9 @@ def show():
         else:
             st.markdown("---")
             st.info(
-                "📍 **Set your location** in the left panel to discover nearby restaurants "
+                "**Set your location** in the left panel to discover nearby restaurants "
                 "serving these dishes.",
-                icon=None,
+                icon=":material/location_on:",
             )
 
 

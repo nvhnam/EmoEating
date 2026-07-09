@@ -1,5 +1,5 @@
 """
-Manual map/restaurant search tester for MoodMeal.
+Manual map/restaurant search tester for EmoEating.
 
 Usage examples:
   # Search by English name, auto-detect location, default 5 km radius
@@ -141,7 +141,7 @@ def _geocode_nominatim(address: str, timeout_s: float = 5.0) -> Optional[dict]:
         resp = requests.get(
             "https://nominatim.openstreetmap.org/search",
             params={"q": address, "format": "json", "limit": 1},
-            headers={"User-Agent": "MoodMeal-test/1.0"},
+            headers={"User-Agent": "EmoEating-test/1.0"},
             timeout=timeout_s,
         )
         if resp.status_code != 200 or not resp.json():
@@ -459,7 +459,7 @@ def _print_result(i: int, r: dict, radius_m: float) -> None:
 
 def main() -> None:
     parser = argparse.ArgumentParser(
-        description="Test the MoodMeal restaurant finder from the command line.",
+        description="Test the EmoEating restaurant finder from the command line.",
         formatter_class=argparse.RawDescriptionHelpFormatter,
         epilog=__doc__,
     )
@@ -497,7 +497,7 @@ def main() -> None:
 
     # ── Header ────────────────────────────────────────────────────────────
     print(f"\n{_BOLD}{'─'*60}")
-    print(f"  MoodMeal Restaurant Finder — Manual Test")
+    print(f"  EmoEating Restaurant Finder — Manual Test")
     print(f"{'─'*60}{_RESET}")
     print(f"  Dish        : {_BOLD}{dish}{_RESET}")
     print(f"  Search query: {_YELLOW}{query}{_RESET}")

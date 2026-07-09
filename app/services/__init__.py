@@ -1,1 +1,1 @@
-# MoodMeal services package
+# EmoEating services package

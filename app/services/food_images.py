@@ -34,7 +34,7 @@ from config import (
     WIKIMEDIA_API_URL,
 )
 
-_HEADERS = {"User-Agent": "MoodMeal/1.0 (research prototype)"}
+_HEADERS = {"User-Agent": "EmoEating/1.0 (research prototype)"}
 _THEMEALDB_SEARCH_URL    = "https://www.themealdb.com/api/json/v1/1/search.php"
 _THEMEALDB_FILTER_URL    = "https://www.themealdb.com/api/json/v1/1/filter.php"
 _SKIP_EXTS = frozenset({"svg", "pdf", "djvu", "tif", "tiff"})

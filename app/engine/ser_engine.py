@@ -1,140 +1,87 @@
 """
-Phase 1 — SER inference module (guide.md Phase 1 & 6).
+SER inference module — public API and backend router (guide.md Phase 1 & 6).
 
-emotion2vec_plus_large off-the-shelf via FunASR AutoModel.
-Single-pass: 16 kHz mono WAV → 9-class softmax → argmax → zone lookup.
+Two swappable backends:
+  "original"    — emotion2vec_plus_large 9-class off-the-shelf (Phase 1 baseline)
+  "crema4class" — emotion2vec backbone + CREMA-D 4-class linear probe (Phase 7 upgrade)
 
-Ma, Z., et al. (2024). emotion2vec: Self-Supervised Pre-Training for Speech Emotion
-  Representation. Findings of ACL 2024. DOI: 10.18653/v1/2024.findings-acl.931
+Active backend is set by SER_BACKEND in config.py; switchable at runtime via
+set_backend() (useful for debugging / A-B comparison without restarting).
 
-Model: iic/emotion2vec_plus_large (~300M params)
-Input: 16 kHz mono WAV (utterance-level granularity)
-Output: 9-class probability distribution
-  [angry, disgusted, fearful, happy, neutral, other, sad, surprised, unknown]
-
-Zone lookup (guide.md Phase 2 canonical table):
-  Q1_POS_ACT       ← happy, surprised
-  Q2_NEG_ACT       ← angry, disgusted, fearful
-  Q3_NEG_DEACT     ← sad
-  NEUTRAL_BASELINE ← neutral, other, unknown
-
-Architectural invariants (guide.md Phase 6):
-  - Single-pass only. No fine-tuning, no ensembling.
-  - Returns BOTH zone AND raw 9-class probability vector for confusion-matrix reporting.
-  - FunASR is the inference framework; do not replace.
+Public API — stable across backends:
+  predict_zone_from_audio(audio_bytes) -> (zone: str, probs: dict[str, float])
+  is_available()  -> bool
+  current_backend() -> {"id": str, "label": str, "n_classes": int}
+  set_backend(backend_id: str)
 """
 
 from __future__ import annotations
 
-import os
-import io
-import tempfile
 import logging
 
 logger = logging.getLogger(__name__)
 
-# Lazy-loaded model — loaded once on first call
-_model = None
+# ── Active backend state ──────────────────────────────────────────────────────
+try:
+    from config import SER_BACKEND as _DEFAULT_BACKEND
+except ImportError:
+    _DEFAULT_BACKEND = "crema4class"
+
+_VALID_BACKENDS = ("original", "crema4class")
+_active_backend_id: str = _DEFAULT_BACKEND
 
 
-def _get_model():
-    """Load emotion2vec_plus_large via FunASR AutoModel (lazy singleton)."""
-    global _model
-    if _model is not None:
-        return _model
-
-    try:
-        from funasr import AutoModel  # type: ignore
-    except ImportError as exc:
-        raise ImportError(
-            "FunASR is not installed. Run:\n"
-            "  pip install funasr modelscope\n"
-            "then restart the application to enable voice-based emotion detection."
-        ) from exc
-
-    from config import SER_MODEL_ID
-    logger.info("Loading emotion2vec_plus_large — first call only (~300M params)...")
-    _model = AutoModel(
-        model=SER_MODEL_ID,
-        trust_remote_code=True,
-        disable_update=True,
-    )
-    logger.info("emotion2vec_plus_large loaded.")
-    return _model
+def set_backend(backend_id: str) -> None:
+    """Switch the active SER backend at runtime. Does not reload already-loaded models."""
+    global _active_backend_id
+    if backend_id not in _VALID_BACKENDS:
+        raise ValueError(
+            f"Unknown SER backend {backend_id!r}. Valid options: {_VALID_BACKENDS}"
+        )
+    if backend_id != _active_backend_id:
+        logger.info("SER backend switched: %s → %s", _active_backend_id, backend_id)
+        _active_backend_id = backend_id
 
 
-def predict_zone_from_audio(
-    audio_bytes: bytes,
-) -> tuple[str, dict[str, float]]:
+def _mod():
+    """Return the active backend module."""
+    if _active_backend_id == "crema4class":
+        from engine import _ser_crema as _backend
+    else:
+        from engine import _ser_original as _backend
+    return _backend
+
+
+# ── Public API ────────────────────────────────────────────────────────────────
+
+def predict_zone_from_audio(audio_bytes: bytes) -> tuple[str, dict[str, float]]:
     """
     Single-pass SER inference.
 
     Args:
-        audio_bytes: Raw WAV bytes (16 kHz mono recommended; other rates accepted
-                     but may degrade accuracy — resample externally if needed).
+        audio_bytes: Raw WAV bytes (16 kHz mono recommended).
 
     Returns:
-        zone  : str — one of {Q1_POS_ACT, Q2_NEG_ACT, Q3_NEG_DEACT, NEUTRAL_BASELINE}
-        probs : dict[str, float] — 9-class softmax probability distribution
-                                   (required for confusion-matrix reporting, guide §7.1)
+        zone  : one of {Q1_POS_ACT, Q2_NEG_ACT, Q3_NEG_DEACT, NEUTRAL_BASELINE}
+        probs : class-probability dict (4-class or 9-class depending on backend)
 
     Raises:
-        ImportError  — if FunASR / modelscope is not installed.
-        RuntimeError — if inference fails (corrupt audio, unsupported format, etc.).
+        ImportError  — FunASR / modelscope not installed.
+        RuntimeError — inference failure (corrupt audio, unsupported format, etc.).
     """
-    from config import SER_EMOTION_TO_ZONE, SER_EMOTION_CLASSES
-
-    model = _get_model()
-
-    # Write audio bytes to a temp file — FunASR AutoModel.generate() requires a path.
-    tmp_fd, tmp_path = tempfile.mkstemp(suffix=".wav")
-    try:
-        with os.fdopen(tmp_fd, "wb") as f:
-            f.write(audio_bytes)
-
-        result = model.generate(
-            input=tmp_path,
-            granularity="utterance",
-            extract_embedding=False,
-        )
-    except Exception as exc:
-        raise RuntimeError(f"SER inference failed: {exc}") from exc
-    finally:
-        if os.path.exists(tmp_path):
-            os.unlink(tmp_path)
-
-    # Parse FunASR emotion2vec output.
-    # Expected format: [{"key": "...", "labels": [...], "scores": [...]}]
-    # Label strings may carry language prefixes, e.g. "angry/angry" → strip prefix.
-    probs: dict[str, float] = {}
-    try:
-        entry = result[0] if isinstance(result, list) and result else {}
-        raw_labels = entry.get("labels", SER_EMOTION_CLASSES)
-        raw_scores = entry.get("scores", [1 / 9] * len(SER_EMOTION_CLASSES))
-
-        for lab, sc in zip(raw_labels, raw_scores):
-            # Strip language prefix if present ("angry/angry" → "angry")
-            clean_lab = lab.split("/")[-1].lower().strip()
-            probs[clean_lab] = float(sc)
-    except Exception as exc:
-        logger.warning("Could not parse SER output; using uniform distribution. %s", exc)
-        probs = {e: 1.0 / 9 for e in SER_EMOTION_CLASSES}
-
-    # Fill in any missing classes with 0.0 for a complete 9-class dict
-    for cls in SER_EMOTION_CLASSES:
-        probs.setdefault(cls, 0.0)
-
-    # argmax → zone lookup (single-pass, no ensembling — guide §6.1)
-    top_emotion = max(probs, key=probs.get)
-    zone = SER_EMOTION_TO_ZONE.get(top_emotion, "NEUTRAL_BASELINE")
-
-    return zone, probs
+    return _mod().predict_zone_from_audio(audio_bytes)
 
 
 def is_available() -> bool:
-    """Return True if FunASR is installed and model can be loaded."""
-    try:
-        import funasr  # noqa: F401
-        return True
-    except ImportError:
-        return False
+    """Return True if the active backend's dependencies are satisfied."""
+    return _mod().is_available()
+
+
+def current_backend() -> dict:
+    """Return metadata for the active backend: id, label, n_classes."""
+    m = _mod()
+    return {
+        "id":        m.BACKEND_ID,
+        "label":     m.BACKEND_LABEL,
+        "n_classes": m.N_CLASSES,
+    }
