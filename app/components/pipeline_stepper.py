@@ -29,26 +29,33 @@ _STAGES = [
 
 
 def render_pipeline_stepper() -> None:
-    """Render the 7-stage EmoEating pipeline as connected, wrapping chips."""
+    """Render the 7-stage EmoEating pipeline as a connected ribbon (desktop)
+    that becomes a vertical stack on phones (<640px, see style.css
+    `.pipeline-stepper`)."""
     chips = []
     for i, (icon_name, label) in enumerate(_STAGES):
         chips.append(
-            f'<div style="display:flex; align-items:center; gap:6px; '
+            f'<div role="listitem" class="pipeline-stage" style="display:flex; align-items:center; gap:8px; '
             f'background:var(--card); border:1px solid var(--border); '
-            f'border-radius:var(--radius-pill); padding:6px 12px 6px 10px; '
-            f'white-space:nowrap; box-shadow:var(--shadow-sm);">'
-            f'<span style="color:var(--brand);">{icon(icon_name, 16)}</span>'
-            f'<span style="font-size:12px; font-weight:600; color:var(--ink);">'
-            f'<span style="color:var(--muted); font-weight:500;">{i + 1}.</span> {label}</span>'
+            f'border-radius:var(--radius-pill); padding:6px 14px 6px 8px; '
+            f'white-space:nowrap; box-shadow:var(--shadow-sm); flex:0 0 auto;">'
+            f'<span class="num" style="display:flex; align-items:center; justify-content:center; '
+            f'width:20px; height:20px; border-radius:50%; background:var(--brand); '
+            f'color:#fff; font-size:11px; font-weight:700; flex-shrink:0;">{i + 1}</span>'
+            f'<span style="color:var(--brand);">{icon(icon_name, 16, label="")}</span>'
+            f'<span style="font-size:12px; font-weight:600; color:var(--ink);">{label}</span>'
             f'</div>'
         )
         if i < len(_STAGES) - 1:
             chips.append(
-                f'<span style="color:var(--border); font-size:16px; flex:0 0 auto;">&#8594;</span>'
+                f'<span class="pipeline-chevron" aria-hidden="true" style="color:var(--border); flex:0 0 auto; display:flex;">'
+                f'{icon("chevron", 16)}</span>'
             )
 
     st.markdown(
-        f'<div style="display:flex; align-items:center; gap:8px; flex-wrap:wrap; '
-        f'margin:8px 0 20px 0;">{"".join(chips)}</div>',
+        f'<div class="pipeline-stepper" role="list" aria-label="ENMS pipeline stages" '
+        f'style="display:flex; align-items:center; gap:8px; flex-wrap:nowrap; '
+        f'overflow-x:auto; padding:4px 2px 12px 2px; margin:8px 0 12px 0;">'
+        f'{"".join(chips)}</div>',
         unsafe_allow_html=True,
     )

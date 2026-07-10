@@ -13,8 +13,6 @@ import os
 # Ensure app/ is on the path so all modules resolve correctly
 sys.path.insert(0, os.path.dirname(os.path.abspath(__file__)))
 
-from theme import build_root_css, GOOGLE_FONTS_IMPORT_URL
-
 st.set_page_config(
     page_title="EmoEating",
     page_icon=":fork_and_knife:",
@@ -22,18 +20,11 @@ st.set_page_config(
     initial_sidebar_state="collapsed",
 )
 
-# Design tokens (app/theme.py is the single source of truth for color/type/
-# spacing — this :root block is what every var(--token) in style.css and in
-# component inline HTML resolves against) load before style.css.
-st.markdown(
-    f"<style>@import url('{GOOGLE_FONTS_IMPORT_URL}');\n{build_root_css()}</style>",
-    unsafe_allow_html=True,
-)
-
-_css_path = os.path.join(os.path.dirname(__file__), "assets", "style.css")
-if os.path.exists(_css_path):
-    with open(_css_path) as f:
-        st.markdown(f"<style>{f.read()}</style>", unsafe_allow_html=True)
+# Design tokens + style.css are injected from WITHIN each page's show()
+# (theme.inject_global_theme()), not here — st.navigation(...).run() below
+# halts further script execution in this entry file, so anything rendered
+# before or after it here is silently discarded and never reaches the page
+# actually shown to the user. See theme.py::inject_global_theme docstring.
 
 # Session token assigned on first visit
 if "session_token" not in st.session_state:

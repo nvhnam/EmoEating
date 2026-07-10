@@ -24,9 +24,12 @@ from config import (
     VOICE_TARGET_SPEECH_S, VOICE_TIMEOUT_S,
 )
 from components.pipeline_stepper import render_pipeline_stepper
+from components.circumplex_plot import render_circumplex
+from theme import inject_global_theme
 
 
 def show():
+    inject_global_theme()
     st.title("Methodology")
     st.markdown(
         "This page documents the computational pipeline underpinning EmoEating's "
@@ -117,13 +120,11 @@ def show():
 
         st.markdown(
             "**Safety.** A live spoken check-in about one's day can surface distress "
-            "the elicitation didn't ask for, so two independent, non-blocking layers "
-            "apply: (1) the agent's own system instruction asks it to acknowledge "
-            "crisis language warmly and surface the 988 Suicide & Crisis Lifeline in "
-            "the moment, independent of any SER output; (2) after classification, a "
-            "strongly negative result (Q2_NEG_ACT / Q3_NEG_DEACT at ≥ 40% top-class "
-            "confidence) surfaces the same 988 resource alongside — never instead "
-            "of — the normal recommendation flow."
+            "the elicitation didn't ask for. The agent's own system instruction asks "
+            "it to acknowledge crisis language warmly and surface the 988 Suicide & "
+            "Crisis Lifeline in the moment, independent of any SER output — this "
+            "runs regardless of what the classifier later assigns, since it responds "
+            "to what the user actually said, not to a zone/confidence threshold."
         )
 
         st.caption(
@@ -145,10 +146,10 @@ def show():
         st.latex(r"\text{emotion} \xrightarrow{\text{Table}} (V,\, A) \in [-1,\, 1]^2")
 
         rows = [
-            (m["emoji"], e.capitalize(), round(m["V"], 2), round(m["A"], 2))
+            (e.capitalize(), round(m["V"], 2), round(m["A"], 2))
             for e, m in EMOTION_COORDS.items()
         ]
-        df = pd.DataFrame(rows, columns=["", "Emotion", "Valence (V)", "Arousal (A)"])
+        df = pd.DataFrame(rows, columns=["Emotion", "Valence (V)", "Arousal (A)"])
         st.dataframe(df, hide_index=True, use_container_width=True)
 
         st.caption(
@@ -205,13 +206,23 @@ def show():
                 f'border:1px solid {_ramp["core"]}; font-size:12px; font-weight:700; '
                 f'padding:4px 12px; border-radius:var(--radius-pill);">'
                 f'Zone: {_label}</span> '
-                f'<span style="font-size:11px; color:var(--muted); margin-left:8px;">'
+                f'<span class="num" style="font-size:11px; color:var(--muted); margin-left:8px;">'
                 f'V={_V:+.2f}, A={_A:+.2f}</span>',
                 unsafe_allow_html=True,
             )
 
+            st.plotly_chart(
+                render_circumplex(selected_emotion=demo_emo_z),
+                use_container_width=True,
+                config={"displayModeBar": False},
+            )
+            st.caption(
+                "Figure: Russell circumplex — the selected emotion's position in "
+                "valence–arousal space, with the four affective zones shaded."
+            )
+
         st.caption(
-            "Design parameter θ = 0.25 based on output distribution of the "
+            f'Design parameter θ = **{THETA_NEUTRAL}** based on output distribution of the '
             "self-reported emotion validation set. See guide.md Phase 2."
         )
 

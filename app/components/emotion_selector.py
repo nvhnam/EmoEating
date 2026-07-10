@@ -1,6 +1,7 @@
 ﻿"""
 11-emotion grid selector component.
-Renders buttons with emoji + label; highlights the selected emotion.
+Renders buttons with a tokenized SVG face icon + label; highlights the
+selected emotion.
 """
 
 from __future__ import annotations
@@ -11,6 +12,7 @@ import os
 sys.path.insert(0, os.path.dirname(os.path.dirname(os.path.abspath(__file__))))
 
 from config import EMOTION_COORDS
+from utils.icons import emotion_icon, icon
 
 
 def render_emotion_selector(selected: str | None = None) -> str | None:
@@ -34,8 +36,23 @@ def render_emotion_selector(selected: str | None = None) -> str | None:
                 is_active = emotion == selected
 
                 with col:
+                    face_color = "var(--brand)" if is_active else "var(--muted)"
+                    # Selection state is never color-only: active also gets a
+                    # check-circle badge and (below) a filled vs. outline
+                    # button, so it reads correctly without relying on hue.
+                    check_badge = (
+                        f'<span style="position:absolute; top:-4px; right:calc(50% - 22px); '
+                        f'color:var(--brand); background:var(--card); border-radius:50%; '
+                        f'display:inline-flex;">{icon("check_circle", 14, label="Selected")}</span>'
+                        if is_active else ""
+                    )
+                    st.markdown(
+                        f'<div style="position:relative; text-align:center; margin-bottom:2px;">'
+                        f'{emotion_icon(emotion, size=28, color=face_color, label="")}{check_badge}</div>',
+                        unsafe_allow_html=True,
+                    )
                     clicked = st.button(
-                        f"{meta['emoji']}\n{emotion.capitalize()}",
+                        emotion.capitalize(),
                         key=f"emo_btn_{emotion}",
                         use_container_width=True,
                         type="primary" if is_active else "secondary",

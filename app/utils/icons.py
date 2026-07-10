@@ -81,6 +81,38 @@ ICONS = {
         f'<line x1="9" y1="12" x2="20" y2="12" {_STROKE}/>'
         f'<line x1="9" y1="17.5" x2="20" y2="17.5" {_STROKE}/>'
     ),
+    "chevron": _svg(f'<path d="M9 5l7 7-7 7" {_STROKE}/>'),
+    "pencil": _svg(
+        f'<path d="M4 20l1-4.5L15.5 5 19 8.5 8.5 19 4 20z" {_STROKE}/>'
+        f'<line x1="13" y1="7" x2="17" y2="11" {_STROKE}/>'
+    ),
+    "arrow_right": _svg(
+        f'<line x1="4" y1="12" x2="19" y2="12" {_STROKE}/>'
+        f'<path d="M13 6l6 6-6 6" {_STROKE}/>'
+    ),
+    "check_circle": _svg(
+        f'<circle cx="12" cy="12" r="9" {_STROKE}/>'
+        f'<path d="M8 12.3l2.6 2.6L16.5 9" {_STROKE}/>'
+    ),
+    "heart": _svg(
+        f'<path d="M12 20.2S3.5 15 3.5 8.9A4.4 4.4 0 0 1 12 6.9a4.4 4.4 0 0 1 8.5 2C20.5 15 12 20.2 12 20.2z" {_STROKE}/>'
+    ),
+    "redo": _svg(
+        f'<path d="M4 12a8 8 0 1 1 2.6 5.9" {_STROKE}/>'
+        f'<path d="M4 17.5V13h4.5" {_STROKE}/>'
+    ),
+    "sliders": _svg(
+        f'<line x1="5" y1="6" x2="19" y2="6" {_STROKE}/>'
+        f'<line x1="5" y1="12" x2="19" y2="12" {_STROKE}/>'
+        f'<line x1="5" y1="18" x2="19" y2="18" {_STROKE}/>'
+        f'<circle cx="9" cy="6" r="1.8" fill="var(--card,#fff)" stroke="currentColor" stroke-width="1.75"/>'
+        f'<circle cx="15" cy="12" r="1.8" fill="var(--card,#fff)" stroke="currentColor" stroke-width="1.75"/>'
+        f'<circle cx="10" cy="18" r="1.8" fill="var(--card,#fff)" stroke="currentColor" stroke-width="1.75"/>'
+    ),
+    "sparkle": _svg(
+        f'<path d="M12 3.5l1.4 4.7 4.7 1.4-4.7 1.4-1.4 4.7-1.4-4.7-4.7-1.4 4.7-1.4z" {_STROKE}/>'
+        f'<path d="M19 15.5l0.6 2 2 0.6-2 0.6-0.6 2-0.6-2-2-0.6 2-0.6z" {_STROKE}/>'
+    ),
 }
 
 
@@ -170,21 +202,47 @@ EMOTION_ICONS = {
 }
 
 
-def icon(name: str, size: int = 20, color: str | None = None) -> str:
-    """Return a sized/colored inline-SVG icon by name (from ICONS)."""
+def _apply_a11y(svg: str, label: str | None) -> str:
+    """Mark an icon as meaningful (`role="img"` + `<title>`) or decorative
+    (`aria-hidden="true"`). Screen readers otherwise get nothing from these
+    inline SVGs — this fixes that in one place for every call site."""
+    if label:
+        svg = svg.replace("<svg ", '<svg role="img" ', 1)
+        idx = svg.index(">") + 1
+        svg = svg[:idx] + f"<title>{label}</title>" + svg[idx:]
+    else:
+        svg = svg.replace("<svg ", '<svg aria-hidden="true" ', 1)
+    return svg
+
+
+def icon(name: str, size: int = 20, color: str | None = None, label: str | None = None) -> str:
+    """Return a sized/colored inline-SVG icon by name (from ICONS).
+
+    `label`, when given, renders the icon as a labeled image
+    (`role="img"` + `<title>`) for screen readers; omit it (the default)
+    for purely decorative icons sitting next to visible text — those get
+    `aria-hidden="true"` instead."""
     svg = ICONS.get(name, "")
     if size != 20:
         svg = svg.replace('width="20" height="20"', f'width="{size}" height="{size}"')
+    svg = _apply_a11y(svg, label)
     if color:
         return f'<span style="color:{color}">{svg}</span>'
     return svg
 
 
-def emotion_icon(name: str, size: int = 20, color: str | None = None) -> str:
-    """Return a sized/colored inline-SVG face icon by emotion name (from EMOTION_ICONS)."""
+def emotion_icon(name: str, size: int = 20, color: str | None = None, label: str | None = None) -> str:
+    """Return a sized/colored inline-SVG face icon by emotion name (from EMOTION_ICONS).
+
+    Defaults `label` to the capitalized emotion name (e.g. "Sad") so every
+    emotion face is announced to screen readers unless the caller passes
+    `label=""` to force it decorative (e.g. when adjacent visible text
+    already names the emotion)."""
     svg = EMOTION_ICONS.get(name, "")
     if size != 20:
         svg = svg.replace('width="20" height="20"', f'width="{size}" height="{size}"')
+    resolved_label = name.replace("_", " ").capitalize() if label is None else (label or None)
+    svg = _apply_a11y(svg, resolved_label)
     if color:
         return f'<span style="color:{color}">{svg}</span>'
     return svg

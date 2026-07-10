@@ -41,69 +41,80 @@ from config import (
     RESTAURANT_MAX_RESULTS,
     USE_VN_DATA,
 )
+from theme import inject_global_theme
+
+# Plain-language framing per affective zone — mirrors 03_emotion.py's
+# _ZONE_FRIENDLY so the check-in summary card never has to print a raw
+# valence/arousal coordinate to the user. V/A are still computed and
+# logged (log_recommendation_session below) — only the printed copy changes.
+_ZONE_FRIENDLY = {
+    "Q1_POS_ACT":       "Upbeat and energized",
+    "Q2_NEG_ACT":       "Tense or on edge",
+    "Q3_NEG_DEACT":     "Low-energy and a bit down",
+    "NEUTRAL_BASELINE": "Calm and steady",
+}
 
 
 def _render_location_ui(recs: list) -> None:
-    st.markdown("---")
-    st.markdown(
-        f'<div style="display:flex; align-items:center; gap:6px; font-weight:600; font-size:14px; color:var(--ink); margin-bottom:2px;">'
-        f'{icon("location", 15)} Your Location</div>',
-        unsafe_allow_html=True,
-    )
-    st.caption("City-level only · session-scoped · no data stored")
-
     user_loc = st.session_state.get("user_location")
-    if user_loc:
-        st.success(user_loc["label"], icon=":material/location_on:")
-        if st.button("Change location", key="clear_location"):
-            del st.session_state["user_location"]
-            for food in recs:
-                st.session_state.pop(f"restaurants_{food.get('id')}", None)
-            st.rerun()
-    else:
-        if st.button("Auto-detect my location", key="auto_detect_loc"):
-            st.session_state["_geo_request"] = "pending"
-            st.session_state["_geo_attempts"] = 0
-            st.rerun()
+    with st.expander(
+        user_loc["label"] if user_loc else "Your location",
+        icon=":material/location_on:",
+        expanded=False,
+    ):
+        st.caption("City-level only · session-scoped · no data stored")
 
-        if st.session_state.get("_geo_request") == "pending":
-            with st.spinner("Detecting your location..."):
-                loc = get_browser_location()
-            if loc:
-                st.session_state["user_location"] = loc
-                st.session_state.pop("_geo_request", None)
-                st.session_state.pop("_geo_attempts", None)
+        if user_loc:
+            st.success(user_loc["label"], icon=":material/location_on:")
+            if st.button("Change location", key="clear_location"):
+                del st.session_state["user_location"]
+                for food in recs:
+                    st.session_state.pop(f"restaurants_{food.get('id')}", None)
                 st.rerun()
-            else:
-                attempts = st.session_state.get("_geo_attempts", 0)
-                if attempts < 2:
-                    st.session_state["_geo_attempts"] = attempts + 1
-                    st.info("Detecting your location...")
-                    st.rerun()
-                else:
-                    loc = get_ip_location()
+        else:
+            if st.button("Auto-detect my location", key="auto_detect_loc"):
+                st.session_state["_geo_request"] = "pending"
+                st.session_state["_geo_attempts"] = 0
+                st.rerun()
+
+            if st.session_state.get("_geo_request") == "pending":
+                with st.spinner("Detecting your location..."):
+                    loc = get_browser_location()
+                if loc:
+                    st.session_state["user_location"] = loc
                     st.session_state.pop("_geo_request", None)
                     st.session_state.pop("_geo_attempts", None)
+                    st.rerun()
+                else:
+                    attempts = st.session_state.get("_geo_attempts", 0)
+                    if attempts < 2:
+                        st.session_state["_geo_attempts"] = attempts + 1
+                        st.info("Detecting your location...")
+                        st.rerun()
+                    else:
+                        loc = get_ip_location()
+                        st.session_state.pop("_geo_request", None)
+                        st.session_state.pop("_geo_attempts", None)
+                        if loc:
+                            st.session_state["user_location"] = loc
+                            st.rerun()
+                        else:
+                            st.warning("Could not auto-detect. Enter your location below.")
+
+            with st.form("location_form", clear_on_submit=False):
+                addr = st.text_input(
+                    "Or enter city / address",
+                    placeholder="e.g. New York, NY · London, UK · Ho Chi Minh City",
+                )
+                st.caption("Works for any city worldwide.")
+                if st.form_submit_button("Search") and addr.strip():
+                    with st.spinner("Geocoding..."):
+                        loc = geocode_address(addr.strip(), GOOGLE_PLACES_API_KEY)
                     if loc:
                         st.session_state["user_location"] = loc
                         st.rerun()
                     else:
-                        st.warning("Could not auto-detect. Enter your location below.")
-
-        with st.form("location_form", clear_on_submit=False):
-            addr = st.text_input(
-                "Or enter city / address",
-                placeholder="e.g. New York, NY · London, UK · Ho Chi Minh City",
-            )
-            st.caption("Works for any city worldwide.")
-            if st.form_submit_button("Search") and addr.strip():
-                with st.spinner("Geocoding..."):
-                    loc = geocode_address(addr.strip(), GOOGLE_PLACES_API_KEY)
-                if loc:
-                    st.session_state["user_location"] = loc
-                    st.rerun()
-                else:
-                    st.warning("Address not found. Try a different format.")
+                        st.warning("Address not found. Try a different format.")
 
 
 def _get_profile() -> PhysiologicalProfile | None:
@@ -132,8 +143,9 @@ def _resolve_zone_and_va(emotion: str) -> tuple[str, float, float]:
 
 
 def show():
+    inject_global_theme()
     if USE_VN_DATA:
-        st.sidebar.info("🇻🇳 Vietnamese Food Dataset active")
+        st.sidebar.info("Vietnamese Food Dataset active")
 
     emotion = st.session_state.get("detected_emotion")
     if not emotion:
@@ -257,45 +269,55 @@ def show():
         left, right = st.columns([3, 7])
 
     with left:
+        # ── Your check-in — always-visible summary; everything else below is
+        # transparency detail available one click away, not stacked by default.
         ramp = ZONE_PALETTE.get(zone, ZONE_PALETTE["NEUTRAL_BASELINE"])
-        face = emotion_icon(emotion, size=32, color=meta.get("color", ramp["accent"]))
+        face = emotion_icon(emotion, size=32, color=meta.get("color", ramp["accent"]), label="")
         source_badge = (
-            f'<span style="font-size:10px; color:var(--brand); margin-top:2px;">{icon("mic", 11)} Voice-detected</span>'
+            f'<span style="font-size:10px; color:var(--brand); margin-top:2px; display:block;">{icon("mic", 11, label="")} Voice-detected</span>'
             if ser_zone else ""
         )
+        confidence_html = (
+            f'<div class="num" style="font-size:0.75rem; color:var(--muted); margin-top:4px;">'
+            f'Confidence: {round(confidence * 5)}/5</div>'
+            if confidence is not None else ""
+        )
+        mood_summary = _ZONE_FRIENDLY.get(zone, "")
         st.markdown(
-            f'<div style="background:var(--card); border:1px solid var(--border); '
-            f'border-radius:var(--radius-md); padding:16px; margin-bottom:12px; box-shadow:var(--shadow-sm);">'
+            f'<div class="card" style="margin-bottom:12px;">'
             f'<div>{face}</div>'
             f'<div style="font-family:var(--font-display); font-size:1.1rem; font-weight:700; color:var(--ink); margin-top:4px;">'
             f'{emotion.capitalize()}</div>'
             f'<div style="font-size:0.8rem; color:var(--muted); margin-top:2px;">'
-            f'V={V:+.2f}, A={A:+.2f}</div>'
+            f'{mood_summary}</div>'
             f'{source_badge}'
+            f'{confidence_html}'
             f'</div>',
             unsafe_allow_html=True,
         )
 
-        render_macro_targets(need)
-        render_micronutrient_info(need, user_sex=user_sex, meal_fraction=meal_fraction)
+        with st.expander("Why these targets?", icon=":material/insights:", expanded=False):
+            render_macro_targets(need)
+            render_micronutrient_info(need, user_sex=user_sex, meal_fraction=meal_fraction)
 
-        if profile:
-            st.markdown("---")
-            st.markdown("**Physiological Profile**")
-            _target = meal_energy_target(profile.tdee_kcal, meal_type)
-            st.caption(
-                f"BMI: {profile.bmi:.1f} ({profile.bmi_category.capitalize()})\n\n"
-                f"TDEE: {fmt_kcal(profile.tdee_kcal)}/day\n\n"
-                f"{MEAL_TYPE_LABELS.get(meal_type, meal_type.capitalize())} target: ~{fmt_kcal(_target)}"
-            )
+            if profile:
+                st.markdown("---")
+                st.markdown("**Physiological Profile**")
+                _target = meal_energy_target(profile.tdee_kcal, meal_type)
+                st.markdown(
+                    f'<div style="font-size:0.85rem; color:var(--muted); line-height:1.8;">'
+                    f'BMI: <span class="num">{profile.bmi:.1f}</span> ({profile.bmi_category.capitalize()})<br>'
+                    f'TDEE: <span class="num">{fmt_kcal(profile.tdee_kcal)}/day</span><br>'
+                    f'{MEAL_TYPE_LABELS.get(meal_type, meal_type.capitalize())} target: <span class="num">~{fmt_kcal(_target)}</span>'
+                    f'</div>',
+                    unsafe_allow_html=True,
+                )
 
         _render_location_ui(recs)
 
-        st.markdown("---")
         st.caption(UI_DISCLAIMER)
 
-        st.markdown("---")
-        if st.button("← Adjust emotion"):
+        if st.button("← Adjust emotion", use_container_width=True):
             for _k in ("recommendations", "_reco_emotion", "_reco_meal_type",
                        "session_id", "detected_emotion", "ser_zone", "ser_probs"):
                 st.session_state.pop(_k, None)
@@ -307,10 +329,9 @@ def show():
     with right:
         meal_label = MEAL_TYPE_LABELS.get(meal_type, meal_type.capitalize())
         st.markdown(
-            f"## Recommended for you "
-            f'<span style="background:var(--brand-tint); color:var(--brand); '
-            f'font-size:0.8rem; padding:3px 10px; border-radius:var(--radius-pill);">'
-            f'{meal_label}</span>',
+            f'<div class="eyebrow">Your recommendations</div>'
+            f'<h2 style="display:flex; align-items:center; gap:10px; flex-wrap:wrap;">Recommended for you '
+            f'<span class="chip">{meal_label}</span></h2>',
             unsafe_allow_html=True,
         )
 
@@ -360,7 +381,7 @@ def show():
                     except Exception:
                         pass
                 st.session_state["selected_food"] = food
-                st.success(f"Great choice! Enjoy your {food.get('name', 'meal')} 🍽️")
+                st.success(f"Great choice! Enjoy your {food.get('name', 'meal')}.")
 
         # ── Nearby Restaurants ────────────────────────────────────────────────
         user_location = st.session_state.get("user_location")
@@ -368,7 +389,7 @@ def show():
             inject_shimmer_css()
             st.markdown("---")
             st.markdown(
-                f'<h3 style="display:flex; align-items:center; gap:8px;">{icon("map", 20)} Find these dishes near you</h3>',
+                f'<h3 style="display:flex; align-items:center; gap:8px;">{icon("map", 20, label="")} Find these dishes near you</h3>',
                 unsafe_allow_html=True,
             )
             st.caption(
