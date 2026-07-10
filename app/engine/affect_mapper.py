@@ -1,9 +1,13 @@
-﻿"""
+"""
 Maps an emotion label (string) to (Valence, Arousal) coordinates.
-Provides stub for future voice-based detection.
+Routes voice-based detection to the SER engine (Phase 1).
+
+Manual path  : emotion label → EMOTION_COORDS → (V, A) → classify_zone()
+SER path     : audio bytes → ser_engine.predict_zone_from_audio() → (zone, probs_9class)
+               VA coordinates are not used in the SER path — zone is returned directly.
 
 Russell Circumplex Model: Russell, J. A. (1980). A circumplex model of affect.
-Journal of Personality and Social Psychology, 39(6), 1161â€“1178.
+  Journal of Personality and Social Psychology, 39(6), 1161–1178.
 """
 
 from __future__ import annotations
@@ -35,19 +39,21 @@ def get_emotion_metadata(emotion_label: str) -> dict:
     return EMOTION_COORDS[label]
 
 
-def detect_from_audio(audio_bytes: bytes, api_endpoint: str = None) -> str:
+def detect_from_audio(audio_bytes: bytes) -> tuple[str, dict[str, float]]:
     """
-    STUB â€” Voice emotion detection.
+    Voice emotion detection via emotion2vec_plus_large (SER path).
 
-    When implemented:
-    - POST audio_bytes to api_endpoint (WAV or MP3)
-    - Receive: {"emotion": str, "confidence": float, "probabilities": {...}}
-    - Return emotion label string matching EMOTION_COORDS keys
+    Args:
+        audio_bytes: Raw WAV bytes (16 kHz mono recommended).
 
-    Expected API endpoint: http://localhost:8001/predict
+    Returns:
+        (zone, probs_9class) where:
+          zone        : str — one of {Q1_POS_ACT, Q2_NEG_ACT, Q3_NEG_DEACT, NEUTRAL_BASELINE}
+          probs_9class: dict[str, float] — 9-class probability distribution
+
+    Raises:
+        ImportError  — FunASR not installed (pip install funasr modelscope).
+        RuntimeError — Inference failed (corrupt audio, etc.).
     """
-    raise NotImplementedError(
-        "Voice emotion detection not yet integrated. "
-        "Implement by replacing this stub with your voice model API call. "
-        "Expected return: emotion label string matching EMOTION_COORDS keys."
-    )
+    from engine.ser_engine import predict_zone_from_audio
+    return predict_zone_from_audio(audio_bytes)

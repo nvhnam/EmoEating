@@ -11,6 +11,7 @@ import os
 sys.path.insert(0, os.path.dirname(os.path.dirname(os.path.abspath(__file__))))
 
 from config import EMOTION_COORDS
+from theme import PALETTE
 
 
 def render_circumplex(selected_emotion: str | None = None) -> go.Figure:
@@ -37,8 +38,8 @@ def render_circumplex(selected_emotion: str | None = None) -> go.Figure:
         )
 
     # Axis lines
-    fig.add_hline(y=0, line=dict(color="#cccccc", width=1, dash="dot"))
-    fig.add_vline(x=0, line=dict(color="#cccccc", width=1, dash="dot"))
+    fig.add_hline(y=0, line=dict(color=PALETTE["border"], width=1, dash="dot"))
+    fig.add_vline(x=0, line=dict(color=PALETTE["border"], width=1, dash="dot"))
 
     # Emotion points
     for emotion, meta in EMOTION_COORDS.items():
@@ -58,12 +59,12 @@ def render_circumplex(selected_emotion: str | None = None) -> go.Figure:
             marker=dict(
                 color=meta["color"],
                 size=size,
-                line=dict(color="#1a1a2e", width=border_width),
+                line=dict(color=PALETTE["ink"], width=border_width),
                 opacity=opacity,
             ),
             text=[label],
             textposition="top center",
-            textfont=dict(size=10, color="#1a1a2e"),
+            textfont=dict(size=10, color=PALETTE["ink"], family="IBM Plex Sans, sans-serif"),
             name=emotion,
             hovertemplate=(
                 f"<b>{emotion.capitalize()}</b><br>"
@@ -76,7 +77,7 @@ def render_circumplex(selected_emotion: str | None = None) -> go.Figure:
     fig.update_layout(
         title=dict(
             text="Russell Circumplex Model of Affect",
-            font=dict(size=14, color="#1a1a2e"),
+            font=dict(size=14, color=PALETTE["ink"], family="Space Grotesk, sans-serif"),
             x=0.5,
         ),
         xaxis=dict(
@@ -91,11 +92,11 @@ def render_circumplex(selected_emotion: str | None = None) -> go.Figure:
             showgrid=False,
             zeroline=False,
         ),
-        height=380,
+        height=360,
         margin=dict(l=40, r=20, t=50, b=40),
-        paper_bgcolor="#f8f9fa",
-        plot_bgcolor="#ffffff",
-        font=dict(family="system-ui, sans-serif"),
+        paper_bgcolor=PALETTE["surface"],
+        plot_bgcolor=PALETTE["card"],
+        font=dict(family="IBM Plex Sans, sans-serif", color=PALETTE["muted"]),
     )
 
     return fig

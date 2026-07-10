@@ -10,5 +10,8 @@ data/processed/
 *.csv
 !data/sql/
 .streamlit/secrets.toml
-.claude
+.claude/
+.pytest_cache/
 plan
+old_archive/
+paper/

@@ -1,5 +1,5 @@
 """
-Restaurant discovery service for MoodMeal.
+Restaurant discovery service for EmoEating.
 
 Ranking formula (paper §4.3):
   R_score(r) = α·proximity(r) + β·rating(r) + γ·availability(r)

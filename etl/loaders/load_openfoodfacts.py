@@ -23,7 +23,8 @@ USECOLS = [
     "energy-kcal_100g", "proteins_100g", "carbohydrates_100g",
     "fiber_100g", "sugars_100g", "fat_100g",
     "iron_100g", "magnesium_100g",
-    "vitamin-c_100g", "vitamin-b12_100g",
+    "vitamin-c_100g", "vitamin-e_100g", "vitamin-b12_100g",
+    "omega-3-fat_100g",
 ]
 
 MOOD_RELEVANT = [
@@ -82,13 +83,21 @@ def load(engine, filepath: str, batch_size: int = 500, max_rows: int = 50_000) -
                     iron    = _to_float(row.get("iron_100g"))
                     mag     = _to_float(row.get("magnesium_100g"))
                     vitc    = _to_float(row.get("vitamin-c_100g"))
+                    vite    = _to_float(row.get("vitamin-e_100g"))
                     vitb12  = _to_float(row.get("vitamin-b12_100g"))
+                    omega3  = _to_float(row.get("omega-3-fat_100g"))
 
-                    # Convert g to mg where needed (iron, magnesium are in g/100g in OFF)
+                    # Convert g to mg where needed (iron, magnesium, vitc, vite, vitb12, omega-3 are in g/100g in OFF)
                     iron   = (iron * 1000) if iron is not None else None
                     mag    = (mag  * 1000) if mag  is not None else None
                     vitc   = (vitc * 1000) if vitc is not None else None
+                    vite   = (vite * 1000) if vite is not None else None
                     vitb12 = (vitb12 * 1000) if vitb12 is not None else None
+                    # Cap at 99.999 g/100g before converting — values above this are
+                    # erroneous in OFF and would overflow DECIMAL(8,3) (max 99999.999 mg).
+                    if omega3 is not None and omega3 > 99.999:
+                        omega3 = None
+                    omega3 = (omega3 * 1000) if omega3 is not None else None
 
                     complex_carbs = max(0.0, (carb or 0) - (sugar or 0)) if carb is not None else None
                     trp = estimate_tryptophan(prot)
@@ -110,13 +119,13 @@ def load(engine, filepath: str, batch_size: int = 500, max_rows: int = 50_000) -
                         "fat_g":            fat,
                         "saturated_fat_g":  None,
                         "tryptophan_mg":    trp,
-                        "omega3_mg":        None,
+                        "omega3_mg":        omega3,
                         "magnesium_mg":     mag,
                         "iron_mg":          iron,
                         "vitamin_b12_mcg":  vitb12,
                         "folate_mcg":       None,
                         "vitamin_c_mg":     vitc,
-                        "vitamin_e_mg":     None,
+                        "vitamin_e_mg":     vite,
                         "vitamin_a_mcg":    None,
                         "calcium_mg":       None,
                         "zinc_mg":          None,

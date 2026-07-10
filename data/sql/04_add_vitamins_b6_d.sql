@@ -1,5 +1,16 @@
--- Migration: add vitamin_b6_mg and vitamin_d_mcg to food_nutrients (moodmeal)
--- Run this against an existing moodmeal DB that was built before this migration.
+-- ============================================================
+-- LEGACY MIGRATION — DO NOT RUN ON A FRESH INSTALL
+-- ============================================================
+-- This migration adds vitamin_b6_mg and vitamin_d_mcg to food_nutrients
+-- and refreshes the meals_with_nutrients VIEW.
+--
+-- FRESH INSTALL (schema v2+, 01_schema.sql dated 2026-05-24 or later):
+--   These columns are already in 01_schema.sql. Do NOT run this file.
+--
+-- EXISTING DATABASE (schema built before 2026-05-17):
+--   Run this once to bring an old database up to date:
+--   mysql -u root -p moodmeal < data/sql/04_add_vitamins_b6_d.sql
+--
 -- Safe to run multiple times — MySQL silently errors if columns already exist.
 
 USE moodmeal;

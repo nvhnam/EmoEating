@@ -17,12 +17,16 @@ def log_recommendation_session(
     zone: str = "",
     confidence: Optional[float] = None,
     user_id: Optional[int] = None,
+    self_reported_v: Optional[float] = None,
+    self_reported_a: Optional[float] = None,
+    self_reported_zone: Optional[str] = None,
     db_conn=None,
 ) -> int:
     """
     Insert a recommendation_sessions row.
     Returns the new session ID (for later selection logging).
-    Zone is stored as a prefix in detected_emotion for traceability (e.g. "happy|Q1_HAPPY").
+    Zone is stored as a prefix in detected_emotion for traceability (e.g. "happy|Q1_POS_ACT").
+    self_reported_v/a/zone: participant affect-grid ground truth for Phase 7 zone agreement.
     """
     from db.queries import log_session
 
@@ -41,6 +45,9 @@ def log_recommendation_session(
             for r in recommendations
         ],
         "user_selected_id":  None,
+        "self_reported_v":   round(self_reported_v, 4) if self_reported_v is not None else None,
+        "self_reported_a":   round(self_reported_a, 4) if self_reported_a is not None else None,
+        "self_reported_zone": self_reported_zone,
     }
 
     return log_session(session_data, db_conn=db_conn)

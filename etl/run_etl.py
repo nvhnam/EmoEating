@@ -35,8 +35,13 @@ from etl.transformers.nutrient_normalizer import compute_normalization_cache
 
 ALL_DATASETS = ["usda", "foodcom", "epicurious", "indian", "off", "vietnamese"]
 
+# Zone-priority enrichment: run after main ETL to backfill NULL micronutrients
+# in complete-meal foods via USDA fuzzy matching (same method as load_indian.py).
+# Enable with --enrich flag. Requires rapidfuzz: pip install rapidfuzz
+ENRICH_THRESHOLD = 70  # RapidFuzz token_set_ratio cutoff
 
-def run(datasets: list[str]) -> None:
+
+def run(datasets: list[str], enrich: bool = False) -> None:
     engine = create_engine(DB_URL, echo=False, pool_pre_ping=True)
 
     # Test connection
@@ -116,9 +121,20 @@ def run(datasets: list[str]) -> None:
             print(f"  WARNING: Vietnamese file not found at {VIETNAMESE_FILE}")
 
     # Normalization cache
-    print("\nComputing normalization cache...")
+    print(“\nComputing normalization cache...”)
     n_cache = compute_normalization_cache(engine)
-    print(f"âœ“ Normalization cache: {n_cache} rows updated.")
+    print(f”✓ Normalization cache: {n_cache} rows updated.”)
+
+    # Optional: micronutrient enrichment pass for complete-meal foods
+    if enrich and “vietnamese” not in datasets:
+        print(“\n── Micronutrient enrichment pass (NUTRIENT_NULL=False support) ──”)
+        print(“  Fuzzy-matching complete-meal names against USDA SR-28 (threshold=70)...”)
+        try:
+            from scripts.enrich_micronutrients import run as enrich_run
+            enrich_run(dry_run=False, threshold=ENRICH_THRESHOLD, batch_size=500)
+        except ImportError:
+            print(“  WARNING: Could not import enrich script. Run manually:”)
+            print(“    python scripts/enrich_micronutrients.py”)
 
     # Validation summary
     print("\nâ”€â”€ Validation â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€")
@@ -154,13 +170,23 @@ def run(datasets: list[str]) -> None:
 
 
 if __name__ == "__main__":
-    parser = argparse.ArgumentParser(description="MoodMeal ETL runner")
+    parser = argparse.ArgumentParser(description="EmoEating ETL runner")
     parser.add_argument(
         "--datasets",
         type=str,
         default=",".join(ALL_DATASETS),
         help=f"Comma-separated list of datasets to load. Options: {ALL_DATASETS}",
     )
+    parser.add_argument(
+        "--enrich",
+        action="store_true",
+        help=(
+            "Run micronutrient enrichment pass after ETL — backfills NULL zone-priority "
+            "micronutrients in complete-meal foods via USDA fuzzy matching. "
+            "Required for NUTRIENT_NULL=False to produce results. "
+            "Requires: pip install rapidfuzz"
+        ),
+    )
     args = parser.parse_args()
     selected = [d.strip().lower() for d in args.datasets.split(",")]
-    run(selected)
+    run(selected, enrich=args.enrich)

@@ -1,5 +1,5 @@
 -- ============================================================
--- MoodMeal Research Database Schema
+-- EmoEating Research Database Schema
 -- Engine: MySQL 8.0+  Charset: utf8mb4
 -- ============================================================
 
@@ -71,8 +71,8 @@ CREATE TABLE IF NOT EXISTS food_nutrients (
     folate_mcg          DECIMAL(8,3) NULL,
     vitamin_c_mg        DECIMAL(8,3) NULL,
     vitamin_e_mg        DECIMAL(8,3) NULL,
-    vitamin_b6_mg       DECIMAL(6,3) NULL,
-    vitamin_d_mcg       DECIMAL(6,3) NULL,
+    vitamin_b6_mg       DECIMAL(8,3) NULL,
+    vitamin_d_mcg       DECIMAL(8,3) NULL,
     vitamin_a_mcg       DECIMAL(8,3) NULL,
     calcium_mg          DECIMAL(8,3) NULL,
     zinc_mg             DECIMAL(8,3) NULL,
@@ -158,6 +158,11 @@ CREATE TABLE IF NOT EXISTS recommendation_sessions (
     emotion_confidence  DECIMAL(4,3) NULL,
     emotion_valence     DECIMAL(4,3) NULL,
     emotion_arousal     DECIMAL(4,3) NULL,
+    -- Phase 7 user-study ground truth: participant affect-grid self-report
+    -- (guide.md §7.2 zone agreement rate; required for validation analysis)
+    self_reported_v     DECIMAL(5,4) NULL COMMENT 'Valence [-1,+1] from affect grid',
+    self_reported_a     DECIMAL(5,4) NULL COMMENT 'Arousal [-1,+1] from affect grid',
+    self_reported_zone  VARCHAR(30)  NULL COMMENT 'Zone derived from self-reported V-A',
     meal_type_filter    VARCHAR(20) NULL,
     recommendations     JSON NOT NULL,
     user_selected_id    INT UNSIGNED NULL,
@@ -165,9 +170,10 @@ CREATE TABLE IF NOT EXISTS recommendation_sessions (
     created_at          TIMESTAMP DEFAULT CURRENT_TIMESTAMP,
     FOREIGN KEY (user_id)         REFERENCES users(id),
     FOREIGN KEY (user_selected_id) REFERENCES foods(id),
-    INDEX idx_emotion (detected_emotion),
-    INDEX idx_session (session_token),
-    INDEX idx_created (created_at)
+    INDEX idx_emotion      (detected_emotion),
+    INDEX idx_session      (session_token),
+    INDEX idx_created      (created_at),
+    INDEX idx_self_zone    (self_reported_zone)
 ) ENGINE=InnoDB DEFAULT CHARSET=utf8mb4 COLLATE=utf8mb4_unicode_ci;
 
 -- ------------------------------------------------------------

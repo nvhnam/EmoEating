@@ -14,7 +14,7 @@ from config import (
     NOMINATIM_REVERSE_URL,
 )
 
-_NOMINATIM_UA = {"User-Agent": "MoodMeal/1.0 (research prototype)"}
+_NOMINATIM_UA = {"User-Agent": "EmoEating/1.0 (research prototype)"}
 
 
 def _geocode_via_places_api(

@@ -16,10 +16,10 @@ def show():
     st.markdown(
         """
         <div style="text-align:center; padding:40px 20px 20px 20px;">
-            <h1 style="font-size:2.4rem; color:#1a1a2e; font-weight:800; margin-bottom:8px;">
+            <h1 style="font-size:clamp(2.2rem, 1.8rem + 2vw, 3rem); color:var(--ink); font-weight:700; margin-bottom:8px; letter-spacing:-0.02em;">
                 EmoEating
             </h1>
-            <p style="font-size:1.1rem; color:#6b7280; max-width:600px; margin:0 auto 24px auto;">
+            <p style="font-size:1.1rem; color:var(--muted); max-width:600px; margin:0 auto 24px auto;">
                 Emotion-aware meal recommendations grounded in affective neuroscience
                 and physiological personalisation.
             </p>
@@ -33,13 +33,14 @@ def show():
         st.markdown(
             """
             <div style="
-                background:#ffffff; border:1px solid #e2e8f0;
-                border-radius:8px; padding:24px; margin-bottom:20px;
+                background:var(--card); border:1px solid var(--border);
+                border-radius:var(--radius-md); padding:24px; margin-bottom:20px;
+                box-shadow:var(--shadow-sm);
             ">
-                <h3 style="color:#1a1a2e; font-size:1rem; margin-bottom:8px;">
+                <h3 style="color:var(--ink); font-size:1rem; margin-bottom:8px;">
                     How it works
                 </h3>
-                <ol style="color:#6b7280; font-size:0.9rem; padding-left:18px;">
+                <ol style="color:var(--muted); font-size:0.9rem; padding-left:18px;">
                     <li>Tell us how you are feeling right now</li>
                     <li>Optionally share your physiological profile</li>
                     <li>Receive research-backed meal recommendations</li>

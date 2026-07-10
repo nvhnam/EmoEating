@@ -1,0 +1,27 @@
+{
+  "model_id": "iic/emotion2vec_plus_large",
+  "embedding_dim": 1024,
+  "n_classes": 4,
+  "label_remap_applied": {
+    "ANG": 0,
+    "DIS": 0,
+    "FEA": 2,
+    "HAP": 1,
+    "NEU": 3,
+    "SAD": 2
+  },
+  "label_names": {
+    "0": "anger",
+    "1": "happy",
+    "2": "sad_fearful",
+    "3": "neutral"
+  },
+  "best_seed": 1,
+  "best_val_wa": 0.9288219887682683,
+  "crema_wa_clean_mean": 0.8789891395275118,
+  "crema_wa_clean_std": 0.021114378049122366,
+  "crema_ccc_mean": 0.8282897939831008,
+  "crema_ccc_std": 0.020360719846171438,
+  "normalisation": "z-score baked into model buffers (mu, std from CREMA-D train set)",
+  "note": "LinearProbeWithNorm: call model(raw_1024_embedding) directly. Normalisation is applied inside the model forward pass. emotion2vec backbone loads automatically from ModelScope cache."
+}

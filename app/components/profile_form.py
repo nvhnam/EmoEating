@@ -80,13 +80,13 @@ def _display_profile_summary(profile, meal_type: str = "lunch") -> None:
     st.markdown(
         f"""
         <div style="
-            background:#f8f9fa; border:1px solid #e2e8f0;
-            border-radius:8px; padding:12px 16px; margin-top:12px;
+            background:var(--surface); border:1px solid var(--border);
+            border-radius:var(--radius-md); padding:12px 16px; margin-top:12px;
         ">
             <div style="display:flex; gap:24px; flex-wrap:wrap; align-items:center;">
                 <div>
-                    <span style="font-size:11px; color:#6b7280; display:block;">BMI</span>
-                    <span style="font-size:22px; font-weight:700; color:{color};">
+                    <span style="font-size:11px; color:var(--muted); display:block;">BMI</span>
+                    <span style="font-family:var(--font-display); font-size:22px; font-weight:700; color:{color};">
                         {fmt_bmi(profile.bmi)}
                     </span>
                     <span style="font-size:11px; color:{color}; margin-left:4px;">
@@ -94,20 +94,20 @@ def _display_profile_summary(profile, meal_type: str = "lunch") -> None:
                     </span>
                 </div>
                 <div>
-                    <span style="font-size:11px; color:#6b7280; display:block;">BMR</span>
-                    <span style="font-size:16px; font-weight:600; color:#1a1a2e;">
+                    <span style="font-size:11px; color:var(--muted); display:block;">BMR</span>
+                    <span style="font-size:16px; font-weight:600; color:var(--ink);">
                         {fmt_kcal(profile.bmr_kcal)}/day
                     </span>
                 </div>
                 <div>
-                    <span style="font-size:11px; color:#6b7280; display:block;">TDEE</span>
-                    <span style="font-size:16px; font-weight:600; color:#1a1a2e;">
+                    <span style="font-size:11px; color:var(--muted); display:block;">TDEE</span>
+                    <span style="font-size:16px; font-weight:600; color:var(--ink);">
                         {fmt_kcal(profile.tdee_kcal)}/day
                     </span>
                 </div>
                 <div>
-                    <span style="font-size:11px; color:#6b7280; display:block;">{MEAL_TYPE_LABELS.get(meal_type, meal_type.capitalize())} target</span>
-                    <span style="font-size:16px; font-weight:600; color:#4a90d9;">
+                    <span style="font-size:11px; color:var(--muted); display:block;">{MEAL_TYPE_LABELS.get(meal_type, meal_type.capitalize())} target</span>
+                    <span style="font-size:16px; font-weight:600; color:var(--brand);">
                         ~{fmt_kcal(meal_target)}
                     </span>
                 </div>
