@@ -14,5 +14,5 @@ streamlit-js-eval>=0.1.7
 torch
 # SER — emotion2vec_plus_large via FunASR (Phase 1 guide.md)
 # Install separately: pip install funasr modelscope
-# funasr>=1.1.0
-# modelscope>=1.14.0
+funasr>=1.1.0
+modelscope>=1.14.0
