@@ -16,3 +16,4 @@ torch
 # Install separately: pip install funasr modelscope
 funasr>=1.1.0
 modelscope>=1.14.0
+torchvision
