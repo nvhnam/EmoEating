@@ -47,13 +47,14 @@ def _get_model():
             "then restart the application."
         ) from exc
     from config import SER_MODEL_ID
-    logger.info("Loading emotion2vec_plus_large (9-class) — first call only...")
+    from engine.ser_engine import resolve_ser_model_path
+    logger.info("Loading emotion2vec (9-class) — first call only...")
     _model = AutoModel(
-        model=SER_MODEL_ID,
+        model=resolve_ser_model_path(SER_MODEL_ID),
         trust_remote_code=True,
         disable_update=True,
     )
-    logger.info("emotion2vec_plus_large (9-class) loaded.")
+    logger.info("emotion2vec (9-class) loaded.")
     return _model
 
 

@@ -27,10 +27,58 @@ Local vs. remote routing:
 from __future__ import annotations
 
 import logging
+import os
 
 from config import SER_MODEL_ID, SER_REMOTE_URL
 
 logger = logging.getLogger(__name__)
+
+# ── Bundled emotion2vec checkpoint (Git LFS) with hub fallback ─────────────────
+# engine/ser_engine.py -> app/ is one level up.
+_APP_DIR = os.path.dirname(os.path.dirname(os.path.abspath(__file__)))
+_BUNDLED_MODEL_DIR = os.path.join(_APP_DIR, "models", "emotion2vec_plus_seed")
+_MIN_WEIGHTS_BYTES = 50 * 1024 * 1024  # real model.pt ~= 1.07 GB; LFS pointer ~= 130 B
+
+
+def resolve_ser_model_path(model_id: str) -> str:
+    """Return the in-repo bundled model directory IF its Git-LFS model.pt
+    resolved to real weights on this machine; otherwise return the ModelScope
+    hub id so FunASR downloads it at runtime (current working behaviour).
+
+    Guards against a deploy that clones without `git lfs pull`, leaving
+    model.pt as a ~130-byte pointer stub -- loading that as weights would
+    crash, so we detect it (by size and by the LFS pointer signature) and
+    fall back.
+    """
+    weights = os.path.join(_BUNDLED_MODEL_DIR, "model.pt")
+    if not os.path.isfile(weights):
+        return model_id
+    try:
+        size = os.path.getsize(weights)
+        if size < _MIN_WEIGHTS_BYTES:
+            logger.warning(
+                "Bundled model.pt is %d bytes (< %d) -- unresolved Git LFS "
+                "pointer; falling back to ModelScope hub id %r.",
+                size, _MIN_WEIGHTS_BYTES, model_id,
+            )
+            return model_id
+        with open(weights, "rb") as fh:
+            head = fh.read(64)
+        if head.lstrip().startswith(b"version https://git-lfs"):
+            logger.warning(
+                "Bundled model.pt is a Git LFS pointer stub -- falling back "
+                "to ModelScope hub id %r.", model_id,
+            )
+            return model_id
+    except OSError as exc:
+        logger.warning(
+            "Could not inspect bundled model.pt (%s); falling back to hub id %r.",
+            exc, model_id,
+        )
+        return model_id
+    logger.info("Using in-repo bundled emotion2vec checkpoint: %s", _BUNDLED_MODEL_DIR)
+    return _BUNDLED_MODEL_DIR
+
 
 # ── Active backend state ──────────────────────────────────────────────────────
 try:

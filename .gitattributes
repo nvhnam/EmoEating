@@ -1,0 +1,1 @@
+app/models/emotion2vec_plus_seed/model.pt filter=lfs diff=lfs merge=lfs -text

@@ -82,13 +82,14 @@ def _get_backbone():
             "then restart the application."
         ) from exc
     from config import SER_MODEL_ID
-    logger.info("Loading emotion2vec_plus_large backbone (CREMA probe) — first call only...")
+    from engine.ser_engine import resolve_ser_model_path
+    logger.info("Loading emotion2vec backbone (CREMA probe) — first call only...")
     _backbone = AutoModel(
-        model=SER_MODEL_ID,
+        model=resolve_ser_model_path(SER_MODEL_ID),
         trust_remote_code=True,
         disable_update=True,
     )
-    logger.info("emotion2vec_plus_large backbone loaded.")
+    logger.info("emotion2vec backbone loaded.")
     return _backbone
 
 
