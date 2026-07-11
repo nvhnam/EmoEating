@@ -13,7 +13,17 @@ sys.path.insert(0, os.path.dirname(os.path.dirname(os.path.abspath(__file__))))
 from engine.physiological import compute_profile, profile_to_dict, meal_energy_target
 from utils.formatting import fmt_bmi, bmi_category_color, fmt_kcal
 from utils.validation import validate_profile_inputs
+from utils.icons import icon
 from config import MEAL_TYPE_LABELS
+
+# BMI category -> icon name, so the status is never color-only (icon + text
+# label + color all carry the same signal).
+_BMI_STATUS_ICON = {
+    "underweight": "info",
+    "normal": "check_circle",
+    "overweight": "info",
+    "obese": "info",
+}
 
 
 def render_profile_form() -> bool:
@@ -25,11 +35,13 @@ def render_profile_form() -> bool:
         col1, col2 = st.columns(2)
 
         with col1:
+            st.markdown('<div class="eyebrow">About you</div>', unsafe_allow_html=True)
             age = st.number_input("Age", min_value=18, max_value=90, step=1, value=30)
             sex = st.selectbox("Biological sex", ["Male", "Female", "Other", "Prefer not to say"])
             height_cm = st.number_input("Height (cm)", min_value=100, max_value=250, step=1, value=170)
 
         with col2:
+            st.markdown('<div class="eyebrow">Preferences</div>', unsafe_allow_html=True)
             weight_kg = st.number_input("Weight (kg)", min_value=30.0, max_value=300.0, step=0.5, value=70.0)
             activity_level = st.selectbox(
                 "Activity level",
@@ -47,7 +59,7 @@ def render_profile_form() -> bool:
                 default=[],
             )
 
-        submitted = st.form_submit_button("Save Profile", type="primary")
+        submitted = st.form_submit_button("Save Profile", type="primary", use_container_width=True)
 
     if submitted:
         sex_key = sex.lower().replace(" ", "_")
@@ -76,38 +88,36 @@ def render_profile_form() -> bool:
 def _display_profile_summary(profile, meal_type: str = "lunch") -> None:
     """Show compact BMI + caloric target summary after form submission."""
     color = bmi_category_color(profile.bmi_category)
+    status_icon = _BMI_STATUS_ICON.get(profile.bmi_category, "info")
     meal_target = meal_energy_target(profile.tdee_kcal, meal_type)
     st.markdown(
         f"""
-        <div style="
-            background:var(--surface); border:1px solid var(--border);
-            border-radius:var(--radius-md); padding:12px 16px; margin-top:12px;
-        ">
-            <div style="display:flex; gap:24px; flex-wrap:wrap; align-items:center;">
-                <div>
+        <div class="card--quiet" style="margin-top:12px;">
+            <div style="display:flex; flex-wrap:wrap; align-items:stretch;">
+                <div style="padding-right:20px;">
                     <span style="font-size:11px; color:var(--muted); display:block;">BMI</span>
-                    <span style="font-family:var(--font-display); font-size:22px; font-weight:700; color:{color};">
+                    <span class="num" style="font-family:var(--font-display); font-size:16px; font-weight:700; color:{color};">
                         {fmt_bmi(profile.bmi)}
                     </span>
-                    <span style="font-size:11px; color:{color}; margin-left:4px;">
-                        {profile.bmi_category.capitalize()}
+                    <span style="color:{color}; margin-left:4px; display:inline-flex; align-items:center; gap:2px; font-size:11px;">
+                        {icon(status_icon, 12, label="")}{profile.bmi_category.capitalize()}
                     </span>
                 </div>
-                <div>
+                <div style="padding:0 20px; border-left:1px solid var(--border);">
                     <span style="font-size:11px; color:var(--muted); display:block;">BMR</span>
-                    <span style="font-size:16px; font-weight:600; color:var(--ink);">
+                    <span class="num" style="font-size:16px; font-weight:600; color:var(--ink);">
                         {fmt_kcal(profile.bmr_kcal)}/day
                     </span>
                 </div>
-                <div>
+                <div style="padding:0 20px; border-left:1px solid var(--border);">
                     <span style="font-size:11px; color:var(--muted); display:block;">TDEE</span>
-                    <span style="font-size:16px; font-weight:600; color:var(--ink);">
+                    <span class="num" style="font-size:16px; font-weight:600; color:var(--ink);">
                         {fmt_kcal(profile.tdee_kcal)}/day
                     </span>
                 </div>
-                <div>
+                <div style="padding-left:20px; border-left:1px solid var(--border);">
                     <span style="font-size:11px; color:var(--muted); display:block;">{MEAL_TYPE_LABELS.get(meal_type, meal_type.capitalize())} target</span>
-                    <span style="font-size:16px; font-weight:600; color:var(--brand);">
+                    <span class="num" style="font-size:16px; font-weight:600; color:var(--brand);">
                         ~{fmt_kcal(meal_target)}
                     </span>
                 </div>

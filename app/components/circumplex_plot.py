@@ -10,31 +10,52 @@ import sys
 import os
 sys.path.insert(0, os.path.dirname(os.path.dirname(os.path.abspath(__file__))))
 
-from config import EMOTION_COORDS
+from config import EMOTION_COORDS, ZONE_PALETTE
 from theme import PALETTE
 
 
-def render_circumplex(selected_emotion: str | None = None) -> go.Figure:
+def _hex_to_rgba(hex_color: str, alpha: float) -> str:
+    hex_color = hex_color.lstrip("#")
+    r, g, b = (int(hex_color[i:i + 2], 16) for i in (0, 2, 4))
+    return f"rgba({r},{g},{b},{alpha})"
+
+
+def render_circumplex(selected_emotion: str | None = None, height: int = 380) -> go.Figure:
     """
     Return a Plotly Figure of the Russell Circumplex with all 11 emotions.
     selected_emotion: if provided, that point is enlarged and highlighted.
     """
     fig = go.Figure()
 
-    # Background quadrant shading
+    # Background quadrant shading — tinted by the affective zone each quadrant
+    # maps to (config.classify_zone / guide.md zone-merge rule), so the plot
+    # itself teaches the zone mapping instead of showing flat neutral panels.
     quadrant_labels = [
-        (0.5,  0.5,  "High V / High A\n(Active Positive)"),
-        (-0.5, 0.5,  "Low V / High A\n(Active Negative)"),
-        (-0.5, -0.5, "Low V / Low A\n(Passive Negative)"),
-        (0.5,  -0.5, "High V / Low A\n(Passive Positive)"),
+        (0.5,  0.5,  "Q1_POS_ACT",       "High V / High A\n(Active Positive)"),
+        (-0.5, 0.5,  "Q2_NEG_ACT",       "Low V / High A\n(Active Negative)"),
+        (-0.5, -0.5, "Q3_NEG_DEACT",     "Low V / Low A\n(Passive Negative)"),
+        (0.5,  -0.5, "NEUTRAL_BASELINE", "High V / Low A\n(Passive Positive)"),
     ]
-    for qx, qy, _ in quadrant_labels:
+    for qx, qy, zone_key, _ in quadrant_labels:
         fig.add_shape(
             type="rect",
-            x0=0, x1=qx * 2 if qx > 0 else qx * 2,
-            y0=0, y1=qy * 2 if qy > 0 else qy * 2,
-            fillcolor="rgba(200,200,200,0.05)",
+            x0=0, x1=qx * 2,
+            y0=0, y1=qy * 2,
+            fillcolor=_hex_to_rgba(ZONE_PALETTE[zone_key]["tint"], 0.55),
             line=dict(width=0),
+        )
+
+    # Quadrant text labels — the zone names are otherwise conveyed by tint
+    # color alone; a faint label makes each quadrant legible without color
+    # (screen readers / colorblind users / greyscale print of the poster).
+    for qx, qy, zone_key, quad_text in quadrant_labels:
+        fig.add_annotation(
+            x=qx, y=qy,
+            text=quad_text.replace("\n", "<br>"),
+            showarrow=False,
+            font=dict(size=9, color=ZONE_PALETTE[zone_key]["core"], family="IBM Plex Sans, sans-serif"),
+            opacity=0.85,
+            align="center",
         )
 
     # Axis lines
@@ -48,7 +69,7 @@ def render_circumplex(selected_emotion: str | None = None) -> go.Figure:
         border_width = 3 if is_selected else 1
         opacity = 1.0 if is_selected else 0.75
 
-        label = f"{meta['emoji']} {emotion.capitalize()}"
+        label = emotion.capitalize()
         if is_selected:
             label = f"<b>{label}</b>"
 
@@ -77,7 +98,7 @@ def render_circumplex(selected_emotion: str | None = None) -> go.Figure:
     fig.update_layout(
         title=dict(
             text="Russell Circumplex Model of Affect",
-            font=dict(size=14, color=PALETTE["ink"], family="Space Grotesk, sans-serif"),
+            font=dict(size=14, color=PALETTE["ink"], family="IBM Plex Sans, sans-serif"),
             x=0.5,
         ),
         xaxis=dict(
@@ -92,8 +113,9 @@ def render_circumplex(selected_emotion: str | None = None) -> go.Figure:
             showgrid=False,
             zeroline=False,
         ),
-        height=360,
-        margin=dict(l=40, r=20, t=50, b=40),
+        height=height,
+        autosize=True,
+        margin=dict(l=32, r=16, t=44, b=36),
         paper_bgcolor=PALETTE["surface"],
         plot_bgcolor=PALETTE["card"],
         font=dict(family="IBM Plex Sans, sans-serif", color=PALETTE["muted"]),

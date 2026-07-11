@@ -17,6 +17,7 @@ from config import (
     ZONE_EXPLANATIONS, ZONE_LABELS, ZONE_COLORS, ZONE_PALETTE,
     NUTRIENT_DISPLAY_LABELS, RDA_REFERENCE,
 )
+from utils.icons import icon
 
 _MACRO_FULL_LABELS = {
     "carb": "Carbohydrates",
@@ -36,8 +37,10 @@ def render_macro_targets(need: NeedVector) -> None:
 
     st.markdown(
         f'<div style="'
-        f'background:{zone_tint}; border-left:3px solid {zone_core}; '
-        f'border-radius:4px; padding:6px 10px; margin-bottom:10px;">'
+        f'background:{zone_tint}; border:1px solid {zone_core}22; '
+        f'border-radius:var(--radius-sm); padding:6px 10px; margin-bottom:10px; '
+        f'display:flex; align-items:center; gap:6px;">'
+        f'<span style="color:{zone_core}; flex-shrink:0; display:inline-flex;">{icon("target", 14, label="")}</span>'
         f'<span style="font-size:11px; font-weight:700; color:{zone_core};">'
         f'Zone: {zone_label}</span>'
         f'</div>',
@@ -46,7 +49,7 @@ def render_macro_targets(need: NeedVector) -> None:
 
     st.markdown(
         f'<div style="font-size:12px; font-weight:600; color:var(--ink); margin-bottom:6px;">'
-        f'Macro Targets <span style="font-weight:400; color:var(--muted);">'
+        f'Macro Targets <span class="num" style="font-weight:400; color:var(--muted);">'
         f'({int(need.meal_kcal)} kcal meal)</span></div>',
         unsafe_allow_html=True,
     )
@@ -67,11 +70,12 @@ def render_macro_targets(need: NeedVector) -> None:
             <div style="margin-bottom:8px;">
                 <div style="display:flex; justify-content:space-between; align-items:center; margin-bottom:2px;">
                     <span style="font-size:12px; color:var(--ink);">{label}</span>
-                    <span style="font-size:12px; font-weight:600; color:{color};">
-                        {grams}g &nbsp;<span style="font-weight:400; color:var(--muted);font-size:10px;">({int(pct*100)}% energy · w={weight:.2f})</span>
+                    <span class="num" style="font-size:12px; font-weight:600; color:{color};">
+                        {grams}g &nbsp;<span style="font-weight:400; color:var(--muted);font-size:10px;">({int(pct*100)}% energy &middot; w={weight:.2f})</span>
                     </span>
                 </div>
-                <div style="background:var(--border); border-radius:3px; height:6px; overflow:hidden;">
+                <div role="progressbar" aria-label="{label} fulfillment" aria-valuenow="{bar_w}" aria-valuemin="0" aria-valuemax="100"
+                     style="background:var(--border); border-radius:3px; height:6px; overflow:hidden;">
                     <div style="width:{bar_w}%; background:{color}; height:100%; border-radius:3px;"></div>
                 </div>
             </div>
@@ -115,12 +119,12 @@ def render_micronutrient_info(
         else:
             rda_str = ""
         target_html = (
-            f' <span style="font-weight:400; color:var(--muted);">· {rda_str}</span>'
+            f' <span class="num" style="font-weight:400; color:var(--muted);">&middot; {rda_str}</span>'
             if rda_str else ""
         )
         chips += (
             f'<div style="background:var(--surface); color:var(--ink); '
-            f'border:1px solid var(--border); font-size:10px; padding:4px 9px; '
+            f'border:1px solid var(--border); font-size:11px; padding:4px 9px; '
             f'border-radius:var(--radius-sm); margin-right:4px; margin-bottom:5px; '
             f'display:inline-block; line-height:1.4;">'
             f'<span style="font-weight:600;">{label}</span>{target_html}</div>'

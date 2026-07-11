@@ -116,6 +116,26 @@
   let pcmChunks = []; // Int16Array[], gated-in (user-only) audio only
   let progressTimer = null;
 
+  // ---------------------------------------------------------------------
+  // Waveform visualization — purely presentational, read-only observers of
+  // the state above (speaking/started/finished). Never writes VAD/gate
+  // state and never touches onWorkletFrame / the audio-capture pipeline.
+  // analyserIn taps `src` (mic) in parallel to the existing worklet
+  // connection; analyserOut is inserted inline between each agent audio
+  // buffer and the speakers (see playPcm()).
+  // ---------------------------------------------------------------------
+  let analyserIn = null;
+  let analyserOut = null;
+  let waveformCanvas = null;
+  let waveformCtx = null;
+  let waveformRafId = null;
+  let waveformDpr = 1;
+  const REDUCED_MOTION = window.matchMedia('(prefers-reduced-motion: reduce)').matches;
+  const WAVEFORM_BARS = 32;
+  const COLOR_USER = '#34496B'; // brand — user is speaking
+  const COLOR_AGENT = '#8098B4'; // lighter tint, same hue family — agent is speaking
+  const COLOR_IDLE = '#CDD5E1'; // muted blue-grey — idle / no active turn
+
   function setStatus(text) {
     if (els.status) els.status.textContent = text;
   }
@@ -169,12 +189,15 @@
   }
 
   function updateProgressUI() {
-    const elapsedS = (Date.now() - startTimeMs) / 1000;
+    // Before the session starts, startTimeMs is still its 0 initial value,
+    // so Date.now() - startTimeMs is ~the current Unix epoch in seconds —
+    // guard so idle state reads "0s elapsed" instead of a decade-scale number.
+    const elapsedS = started ? (Date.now() - startTimeMs) / 1000 : 0;
     if (els.speechSeconds) els.speechSeconds.textContent = speechElapsedS.toFixed(0) + 's';
     if (els.elapsedSeconds) els.elapsedSeconds.textContent = elapsedS.toFixed(0) + 's';
     if (els.progressBar) {
       const pct = Math.min(100, (speechElapsedS / CONFIG.targetSpeechS) * 100);
-      els.progressBar.style.width = pct + '%';
+      els.progressBar.style.transform = 'scaleX(' + (pct / 100) + ')'; // transform, not width — avoids layout thrash
     }
     if (els.gateState) {
       els.gateState.textContent = !started
@@ -185,6 +208,114 @@
             ? 'Agent is speaking...'
             : 'Listening to you...';
     }
+    // Presentational hooks only (mic button ring / waveform color via CSS
+    // and drawWaveformFrame()) — no state is read back from these classes.
+    document.body.classList.toggle('is-started', started && !finished);
+    document.body.classList.toggle('is-speaking', speaking);
+    document.body.classList.toggle('is-wrapping', wrappingUp);
+    if (REDUCED_MOTION) drawWaveformFrame(); // discrete redraw on each state tick
+  }
+
+  // ---------------------------------------------------------------------
+  // Waveform canvas — read-only observer of analyserIn/analyserOut +
+  // speaking/started/finished. See the block comment above analyserIn's
+  // declaration for the non-interference guarantee.
+  // ---------------------------------------------------------------------
+  function initWaveformCanvas() {
+    waveformCanvas = document.getElementById('waveform');
+    if (!waveformCanvas) return;
+    waveformCtx = waveformCanvas.getContext('2d');
+    resizeWaveformCanvas();
+  }
+
+  // Root-cause fix: the canvas backing store used to be sized once, at
+  // initWaveformCanvas() time, via getBoundingClientRect() — before the
+  // Streamlit iframe has necessarily laid out to its final width. If that
+  // first read landed on a 0/near-0 rect, the canvas stayed effectively
+  // invisible for the rest of the session since nothing ever resized it.
+  // This is now callable repeatedly (ResizeObserver, window resize, and
+  // Streamlit's onRender) so a late layout always self-corrects.
+  function resizeWaveformCanvas() {
+    if (!waveformCanvas) return;
+    const rect = waveformCanvas.getBoundingClientRect();
+    if (rect.width < 2 || rect.height < 2) return; // not laid out yet; caller retries
+    waveformDpr = window.devicePixelRatio || 1;
+    const w = Math.max(1, Math.round(rect.width * waveformDpr));
+    const h = Math.max(1, Math.round(rect.height * waveformDpr));
+    if (w === waveformCanvas.width && h === waveformCanvas.height) return;
+    waveformCanvas.width = w;
+    waveformCanvas.height = h;
+  }
+
+  function drawBars(levels, color) {
+    const w = waveformCanvas.width;
+    const h = waveformCanvas.height;
+    waveformCtx.clearRect(0, 0, w, h);
+    waveformCtx.fillStyle = color;
+    const gap = w * 0.012;
+    const barW = (w - gap * (WAVEFORM_BARS - 1)) / WAVEFORM_BARS;
+    const radius = Math.min(barW / 2, 4 * waveformDpr);
+    for (let i = 0; i < WAVEFORM_BARS; i++) {
+      const amp = Math.max(0.06, levels[i]); // floor so idle still reads as "alive"
+      const barH = Math.max(barW, amp * h);
+      const x = i * (barW + gap);
+      const y = (h - barH) / 2;
+      waveformCtx.beginPath();
+      if (waveformCtx.roundRect) {
+        waveformCtx.roundRect(x, y, barW, barH, radius);
+      } else {
+        waveformCtx.rect(x, y, barW, barH);
+      }
+      waveformCtx.fill();
+    }
+  }
+
+  function levelsFromAnalyser(analyser) {
+    const freq = new Uint8Array(analyser.frequencyBinCount);
+    analyser.getByteFrequencyData(freq);
+    const step = Math.max(1, Math.floor(freq.length / WAVEFORM_BARS));
+    const levels = new Array(WAVEFORM_BARS).fill(0);
+    for (let i = 0; i < WAVEFORM_BARS; i++) {
+      levels[i] = freq[i * step] / 255;
+    }
+    return levels;
+  }
+
+  function levelsIdle(t) {
+    // Gentle sine-driven "breathing" pattern — no analyser data needed.
+    const levels = new Array(WAVEFORM_BARS).fill(0);
+    for (let i = 0; i < WAVEFORM_BARS; i++) {
+      const phase = t / 900 + i * 0.35;
+      levels[i] = 0.08 + 0.05 * (0.5 + 0.5 * Math.sin(phase));
+    }
+    return levels;
+  }
+
+  function drawWaveformFrame() {
+    if (!waveformCtx) return;
+    const active = started && !finished;
+    if (active && speaking && analyserOut) {
+      drawBars(levelsFromAnalyser(analyserOut), COLOR_AGENT);
+    } else if (active && !speaking && analyserIn) {
+      drawBars(levelsFromAnalyser(analyserIn), COLOR_USER);
+    } else {
+      drawBars(levelsIdle(Date.now()), COLOR_IDLE);
+    }
+  }
+
+  function waveformLoop() {
+    drawWaveformFrame();
+    waveformRafId = requestAnimationFrame(waveformLoop);
+  }
+
+  function startWaveformLoop() {
+    // Intentionally never stopped: it's cheap (32 rects/frame), always
+    // wanted (idle breathing → listening → agent-speaking → idle again),
+    // and the component is torn down as a whole iframe on remount
+    // (Python increments key=f"voice_conv_{seq}"), which naturally kills
+    // this loop with it — no separate stop/cleanup call needed.
+    if (REDUCED_MOTION || waveformRafId) return;
+    waveformLoop();
   }
 
   function maybeAutoWrapUp() {
@@ -328,7 +459,7 @@
     buf.copyToChannel(f32, 0);
     const node = audioCtxOut.createBufferSource();
     node.buffer = buf;
-    node.connect(audioCtxOut.destination);
+    node.connect(analyserOut || audioCtxOut.destination); // analyserOut passes audio straight through to destination
     const t = Math.max(audioCtxOut.currentTime, playHead);
     node.start(t);
     playHead = t + buf.duration;
@@ -372,7 +503,18 @@
     src.connect(workletNode);
     workletNode.port.onmessage = (ev) => onWorkletFrame(new Int16Array(ev.data));
 
+    // Waveform taps — parallel fan-out, does not alter src.connect(workletNode)
+    // above or anything in the VAD/gate path.
+    analyserIn = audioCtxIn.createAnalyser();
+    analyserIn.fftSize = 128;
+    analyserIn.smoothingTimeConstant = 0.75;
+    src.connect(analyserIn);
+
     audioCtxOut = new AudioContext({ sampleRate: PLAYBACK_RATE });
+    analyserOut = audioCtxOut.createAnalyser();
+    analyserOut.fftSize = 128;
+    analyserOut.smoothingTimeConstant = 0.75;
+    analyserOut.connect(audioCtxOut.destination);
     try {
       await audioCtxOut.resume();
     } catch (e) {
@@ -382,6 +524,18 @@
       await audioCtxIn.resume();
     } catch (e) {
       /* noop */
+    }
+    // Belt-and-suspenders: startSession() only runs from the mic button's
+    // click handler, which is already a user gesture, so resume() above
+    // should always succeed — but if a browser still leaves either context
+    // suspended, retry on the next document click rather than leaving the
+    // waveform silently frozen for the rest of the session.
+    if ((audioCtxOut && audioCtxOut.state === 'suspended') || (audioCtxIn && audioCtxIn.state === 'suspended')) {
+      const resumeAll = () => {
+        if (audioCtxOut && audioCtxOut.state === 'suspended') audioCtxOut.resume().catch(() => {});
+        if (audioCtxIn && audioCtxIn.state === 'suspended') audioCtxIn.resume().catch(() => {});
+      };
+      document.addEventListener('click', resumeAll, { once: true });
     }
     playHead = 0;
 
@@ -513,6 +667,8 @@
     micStream = null;
     audioCtxIn = null;
     audioCtxOut = null;
+    analyserIn = null;
+    analyserOut = null;
   }
 
   function finalizeAndSend() {
@@ -552,11 +708,35 @@
     // exact field path is confirmed against current Gemini Live docs.
     if (typeof args.voice === 'string') CONFIG.voice = args.voice;
     if (typeof args.ws_url === 'string') CONFIG.wsUrl = args.ws_url;
-    setFrameHeight(document.documentElement.scrollHeight || 220);
+    // Streamlit sends streamlit:render once the component has actually been
+    // mounted/sized — a second resize pass here catches the common case
+    // where the very first initWaveformCanvas() call raced the iframe's
+    // layout. Math.max floor guards against a transient small scrollHeight
+    // collapsing the iframe and clipping the canvas region.
+    resizeWaveformCanvas();
+    if (waveformCtx) drawWaveformFrame();
+    setFrameHeight(Math.max(document.documentElement.scrollHeight || 0, 560));
   }
   window.addEventListener('message', onRender);
 
+  initWaveformCanvas();
+  startWaveformLoop();
   updateProgressUI();
-  setFrameHeight(220);
+  setFrameHeight(560);
   componentReady();
+
+  // Belt-and-suspenders: rescale the canvas backing store whenever its
+  // laid-out size changes (iframe resize, orientation change, late fonts
+  // shifting layout) — not just once at init.
+  if (window.ResizeObserver && waveformCanvas) {
+    const waveformResizeObserver = new ResizeObserver(() => {
+      resizeWaveformCanvas();
+      if (waveformCtx) drawWaveformFrame();
+    });
+    waveformResizeObserver.observe(waveformCanvas);
+  }
+  window.addEventListener('resize', () => {
+    resizeWaveformCanvas();
+    if (waveformCtx) drawWaveformFrame();
+  });
 })();

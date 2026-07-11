@@ -1,31 +1,78 @@
 /* EmoEating — design system
    Tokens (:root vars) and the Google Fonts @import are injected by
-   app/main.py via app/theme.py::build_root_css() BEFORE this file loads,
-   so every var(--token) below and in component inline styles resolves
-   against app/theme.py's PALETTE — the single source of truth. */
+   theme.py::inject_global_theme(), called from the top of every page's
+   show() (see app/pages/*.py) — every var(--token) below and in component
+   inline styles resolves against app/theme.py's PALETTE, the single
+   source of truth.
+
+   !important on typography/color below: Streamlit generates its own
+   scoped rules per component (e.g. `.st-emotion-cache-xxx h1`) that carry
+   higher specificity than a plain element selector and otherwise win
+   regardless of source order — verified against the running app. */
 
 /* ── Base typography ─────────────────────────────────────────────────────── */
 html, body, [class*="css"] {
-    font-family: var(--font-body);
-    color: var(--ink);
+    font-family: var(--font-body) !important;
+    color: var(--ink) !important;
     font-size: 15px;
+    line-height: 1.6;
 }
 
 h1, h2, h3, h4 {
-    font-family: var(--font-display);
-    font-weight: 600;
-    color: var(--ink);
-    letter-spacing: -0.01em;
+    font-family: var(--font-display) !important;
+    font-weight: 700 !important;
+    color: var(--ink) !important;
+    letter-spacing: -0.02em !important;
+    text-wrap: balance;
 }
 
-h1 { font-size: clamp(1.75rem, 1.4rem + 1.5vw, 2.5rem); font-weight: 700; }
-h2 { font-size: clamp(1.3rem, 1.1rem + 0.8vw, 1.75rem); }
-h3 { font-size: 1.125rem; }
+/* Fixed rem scale, not fluid — product-register in-task UI is viewed at a
+   consistent DPI, so a shrinking h1 inside a narrow column looks worse, not
+   better. (pages/01_home.py's hero keeps its own clamp() as the one
+   deliberate landing-surface exception.) */
+h1 { font-size: 2rem !important; font-weight: 700 !important; }
+h2 { font-size: 1.5rem !important; font-weight: 700 !important; }
+h3 { font-size: 1.1875rem !important; font-weight: 600 !important; letter-spacing: -0.01em !important; }
 
-p, li, span, label, div { font-family: var(--font-body); }
+p { text-wrap: pretty; }
+
+/* :not([data-testid*="Icon"]) — Streamlit's material icons (info/mic/
+   location/etc.) render as a font ligature (the span's text content is
+   literally the icon's name, e.g. "info") via a dedicated icon font.
+   Forcing our body font onto that span would print the literal word
+   instead of the glyph. */
+p, li, span:not([data-testid*="Icon"]), label, div {
+    font-family: var(--font-body) !important;
+}
 
 code, pre {
     font-family: var(--font-mono);
+}
+
+/* Eyebrow / overline utility — small-caps-style label above a heading. */
+.eyebrow {
+    display: inline-block;
+    font-family: var(--font-body);
+    font-size: 11px;
+    font-weight: 600;
+    letter-spacing: 0.08em;
+    text-transform: uppercase;
+    color: var(--muted);
+    margin-bottom: var(--space-2);
+}
+
+/* Mono tabular-numeral utility — wrap every rendered number (kcal, ENMS
+   scores, V/A coords, RDA %, BMI/BMR/TDEE, timers) so numeric evidence
+   reads as measured/precise rather than prose. */
+.num {
+    font-family: var(--font-mono);
+    font-variant-numeric: tabular-nums;
+    letter-spacing: 0;
+}
+
+small, .caption, [data-testid="stCaptionContainer"] {
+    font-size: 12.5px !important;
+    color: var(--muted) !important;
 }
 
 /* ── App shell ────────────────────────────────────────────────────────────── */
@@ -36,8 +83,13 @@ code, pre {
 #MainMenu { visibility: hidden; }
 footer    { visibility: hidden; }
 
+/* !important: Streamlit ships its own sidebar visibility rule at equal-or-
+   higher specificity, injected after this stylesheet — a plain display:none
+   here is silently overridden (verified against the running app). This is
+   a controlled research-study flow (st.navigation(..., position="hidden")
+   in main.py); the sidebar must actually be gone, not just intended to be. */
 section[data-testid="stSidebar"] {
-    display: none;
+    display: none !important;
 }
 
 /* Fluid, responsive main container */
@@ -58,6 +110,12 @@ section[data-testid="stSidebar"] {
     }
 }
 
+/* ── Focus visibility (global) ───────────────────────────────────────────── */
+:focus-visible {
+    outline: 2px solid var(--focus);
+    outline-offset: 2px;
+}
+
 /* ── Buttons ──────────────────────────────────────────────────────────────── */
 .stButton > button {
     border-radius: var(--radius-sm);
@@ -67,24 +125,99 @@ section[data-testid="stSidebar"] {
     min-height: 44px;
     transition: background var(--motion-base) var(--motion-ease),
                 border-color var(--motion-base) var(--motion-ease),
+                box-shadow var(--motion-base) var(--motion-ease),
                 transform var(--motion-fast) var(--motion-ease);
 }
 
 .stButton > button[kind="primary"] {
-    background-color: var(--brand);
+    background: var(--gradient-brand);
     color: #ffffff;
     border: none;
+    box-shadow: var(--shadow-sm);
 }
 .stButton > button[kind="primary"]:hover {
-    background-color: var(--brand-hover);
+    background: var(--brand-hover);
+    box-shadow: var(--shadow-md);
+    transform: translateY(-1px);
+}
+.stButton > button[kind="primary"]:active {
+    transform: translateY(0);
 }
 
+.stButton > button[kind="secondary"] {
+    border-color: var(--border);
+}
 .stButton > button[kind="secondary"]:hover {
     border-color: var(--brand);
     color: var(--brand);
+    background: var(--brand-tint);
 }
 
-/* ── Cards ────────────────────────────────────────────────────────────────── */
+.stButton > button:focus-visible {
+    outline: 2px solid var(--focus);
+    outline-offset: 2px;
+}
+
+.stButton > button:disabled {
+    opacity: 0.45;
+}
+
+/* ── Cards / surfaces (emphasis-tier system) ─────────────────────────────────
+   .card         — standard surface, default weight
+   .card--hero   — the one important thing on the page (elevate bg, shadow-lg)
+   .card--quiet  — de-emphasized / secondary panel (hairline border, no shadow)
+   .panel-accent — left color bar for zone/status association (non-color-only:
+                   always pair with an icon/label, never the sole indicator)
+   .chip         — small inline pill (reassurance rows, tags) */
+.card {
+    background: var(--card);
+    border: 1px solid var(--border);
+    border-radius: var(--radius-md);
+    padding: var(--space-4);
+    box-shadow: var(--shadow-sm);
+}
+
+.card--hero {
+    background: var(--gradient-hero);
+    border: 1px solid var(--hairline);
+    border-radius: var(--radius-lg);
+    padding: var(--space-5);
+    box-shadow: var(--shadow-lg);
+}
+
+.card--quiet {
+    background: var(--elevate);
+    border: 1px solid var(--hairline);
+    border-radius: var(--radius-md);
+    padding: var(--space-4);
+    box-shadow: none;
+}
+
+/* Zone/status association — matches the app's existing badge convention
+   (tinted fill + thin all-round border in the same hue, e.g. the zone
+   badges in components/*.py) rather than a colored side-bar, which reads
+   as a generic AI-dashboard template. Call sites set the actual zone/
+   status color inline (background: var(--zone-*-tint); border-color:
+   var(--zone-*-core)); this class only fixes the shape. */
+.panel-accent {
+    border: 1px solid var(--border);
+    border-radius: var(--radius-md);
+    padding: var(--space-4);
+}
+
+.chip {
+    display: inline-flex;
+    align-items: center;
+    gap: 6px;
+    background: var(--brand-tint);
+    color: var(--brand);
+    border: 1px solid var(--border);
+    border-radius: var(--radius-pill);
+    padding: 4px 12px;
+    font-size: 12.5px;
+    font-weight: 600;
+}
+
 .meal-card {
     background: var(--card);
     border: 1px solid var(--border);
@@ -99,6 +232,9 @@ section[data-testid="stSidebar"] {
     box-shadow: var(--shadow-md);
     transform: translateY(-2px);
 }
+.meal-card--hero {
+    box-shadow: var(--shadow-lg), var(--shadow-ring);
+}
 
 /* ── Expander ─────────────────────────────────────────────────────────────── */
 .streamlit-expanderHeader,
@@ -110,6 +246,7 @@ section[data-testid="stSidebar"] {
 [data-testid="stExpander"] {
     border-radius: var(--radius-md);
     border-color: var(--border);
+    background: var(--card);
 }
 
 /* ── Tabs ─────────────────────────────────────────────────────────────────── */
@@ -117,9 +254,131 @@ section[data-testid="stSidebar"] {
     font-family: var(--font-display);
     font-weight: 600;
     font-size: 0.9rem;
+    transition: color var(--motion-base) var(--motion-ease);
 }
 [data-testid="stTabs"] button[aria-selected="true"] {
     color: var(--brand);
+}
+[data-testid="stTabs"] [data-baseweb="tab-highlight"] {
+    background-color: var(--brand) !important;
+}
+
+/* ── Form controls (widget-chrome coverage) ──────────────────────────────────
+   Streamlit's stock text/number/select/slider/multiselect/form chrome was
+   previously unstyled and read as "default app". Bring every input family
+   up to the card/border/radius/focus system used everywhere else. */
+[data-testid="stTextInput"] input,
+[data-testid="stNumberInput"] input,
+[data-baseweb="input"],
+[data-baseweb="select"] > div,
+[data-baseweb="textarea"] textarea,
+textarea {
+    background: var(--card) !important;
+    border: 1px solid var(--border) !important;
+    border-radius: var(--radius-sm) !important;
+    color: var(--ink) !important;
+    font-family: var(--font-body) !important;
+    transition: border-color var(--motion-base) var(--motion-ease),
+                box-shadow var(--motion-base) var(--motion-ease);
+}
+[data-testid="stTextInput"] input:focus,
+[data-testid="stNumberInput"] input:focus,
+[data-baseweb="input"]:focus-within,
+[data-baseweb="select"]:focus-within > div,
+textarea:focus {
+    border-color: var(--focus) !important;
+    box-shadow: 0 0 0 3px rgba(108, 140, 199, 0.18) !important;
+}
+
+[data-testid="stNumberInput"] button {
+    border-color: var(--border) !important;
+}
+
+[data-testid="stMultiSelect"] [data-baseweb="tag"] {
+    background: var(--brand-tint) !important;
+    color: var(--brand) !important;
+    border-radius: var(--radius-sm) !important;
+}
+
+[data-testid="stSlider"] [role="slider"] {
+    background-color: var(--brand) !important;
+    box-shadow: var(--shadow-sm) !important;
+}
+[data-testid="stSlider"] [data-testid="stTickBarMin"],
+[data-testid="stSlider"] [data-testid="stTickBarMax"] {
+    font-family: var(--font-mono) !important;
+    color: var(--muted) !important;
+}
+[data-testid="stSlider"] .st-emotion-cache-1dj0hjr,
+[data-testid="stSlider"] div[data-baseweb="slider"] > div > div {
+    background-color: var(--brand) !important;
+}
+
+[data-testid="stForm"] {
+    background: var(--card);
+    border: 1px solid var(--border);
+    border-radius: var(--radius-md);
+    padding: var(--space-5);
+    box-shadow: var(--shadow-sm);
+}
+
+[data-testid="stCheckbox"] label,
+[data-testid="stRadio"] label {
+    font-family: var(--font-body) !important;
+}
+
+label[data-testid="stWidgetLabel"] p {
+    font-weight: 600 !important;
+    color: var(--ink) !important;
+    font-size: 0.9rem !important;
+}
+
+/* Dataframes / tables — bordered container so they read as "designed",
+   and keep horizontal scroll inside their own box on narrow viewports
+   instead of forcing the page to scroll. */
+[data-testid="stDataFrame"],
+[data-testid="stTable"] {
+    border: 1px solid var(--border);
+    border-radius: var(--radius-md);
+    overflow: auto;
+    box-shadow: var(--shadow-sm);
+}
+
+/* Alerts (info/warning/success/error) — bordered card with a soft shadow so
+   they read as designed rather than a flat stock fill. Semantic color
+   already comes from Streamlit's own per-severity background tint + icon
+   color, which we keep as-is rather than adding a redundant accent bar
+   (a colored side-stripe on every alert is a template-y pattern the rest
+   of this app deliberately avoids — see .panel-accent above). */
+[data-testid="stAlert"] {
+    border-radius: var(--radius-md) !important;
+    border: 1px solid var(--border) !important;
+    box-shadow: var(--shadow-sm);
+    padding: var(--space-4) !important;
+}
+
+/* Progress (st.progress) — brand fill, rounded track.
+   `[data-testid="stProgress"] > div` matches TWO siblings — the text-label
+   wrapper AND the `[data-baseweb="progress-bar"]` bar itself — so styling
+   must scope through `[data-baseweb="progress-bar"]` specifically, not the
+   testid container's direct children (that bug painted the text label as a
+   solid pill). Track is 1 level under the baseweb root; the actual fill is
+   3 levels under it (verified against the rendered DOM). Radius uses `sm`,
+   not `pill` — full-pill radius on a track this thin (~4-8px) distorts into
+   an ellipse/blob at small fill percentages. */
+[data-testid="stProgress"] [data-baseweb="progress-bar"] > div {
+    background-color: var(--border) !important;
+    border-radius: var(--radius-sm) !important;
+}
+[data-testid="stProgress"] [data-baseweb="progress-bar"] > div > div > div {
+    background-color: var(--brand) !important;
+    border-radius: var(--radius-sm) !important;
+}
+
+/* Popover (Backend debug control) */
+[data-testid="stPopoverBody"] {
+    border-radius: var(--radius-md) !important;
+    border-color: var(--border) !important;
 }
 
 /* ── Plotly chart container ──────────────────────────────────────────────── */
@@ -143,6 +402,11 @@ section[data-testid="stSidebar"] {
         width: 100% !important;
         flex: 1 1 100% !important;
         min-width: 100% !important;
+    }
+    [data-testid="stTextInput"] input,
+    [data-testid="stNumberInput"] input,
+    [data-baseweb="select"] > div {
+        width: 100% !important;
     }
 }
 
@@ -170,12 +434,22 @@ section[data-testid="stSidebar"] {
 }
 
 /* ── Recommendations context/cards split (pages/04_recommendations.py) ──────
-   On mobile, naively stacking the [3,7] context|cards split buries the
-   actual meal recommendations under the (long) context panel. Reorder so
-   the meal cards render first and the context panel follows. Scoped to the
-   outer split only (`> [stLayoutWrapper] > [stHorizontalBlock]`) so nested
-   st.columns() inside meal cards / expanders are unaffected. */
-@media (max-width: 640px) {
+   On mobile/tablet, naively stacking the [3,7] context|cards split buries
+   the actual meal recommendations under the (long) context panel, or —
+   below 900px, before the panel has room to breathe — cramps both columns
+   unreadably. Reorder so the meal cards render first and the context panel
+   follows. Scoped to the outer split only (`> [stLayoutWrapper] >
+   [stHorizontalBlock]`) so nested st.columns() inside meal cards /
+   expanders are unaffected. */
+@media (max-width: 900px) {
+    .st-key-reco-split > [data-testid="stLayoutWrapper"] > [data-testid="stHorizontalBlock"] {
+        flex-direction: column;
+    }
+    .st-key-reco-split > [data-testid="stLayoutWrapper"] > [data-testid="stHorizontalBlock"] > [data-testid="stColumn"] {
+        width: 100% !important;
+        flex: 1 1 100% !important;
+        min-width: 100% !important;
+    }
     .st-key-reco-split > [data-testid="stLayoutWrapper"] > [data-testid="stHorizontalBlock"] > [data-testid="stColumn"]:nth-of-type(1) {
         order: 2;
     }
@@ -184,9 +458,46 @@ section[data-testid="stSidebar"] {
     }
 }
 
+/* ── Pipeline stepper (components/pipeline_stepper.py) ───────────────────────
+   Desktop keeps the horizontal ribbon; below 640px switch to a vertical
+   stack so each stage is fully readable instead of relying on horizontal
+   scroll to discover later stages. */
+@media (max-width: 640px) {
+    .pipeline-stepper {
+        flex-direction: column !important;
+        overflow-x: visible !important;
+    }
+    .pipeline-stepper .pipeline-stage {
+        flex: 1 1 100% !important;
+        width: 100% !important;
+    }
+    .pipeline-stepper .pipeline-chevron {
+        transform: rotate(90deg);
+    }
+}
+
 /* ── Misc responsive polish ──────────────────────────────────────────────── */
 @media (max-width: 640px) {
     .js-plotly-plot {
         width: 100% !important;
+    }
+}
+
+/* ── Reduced motion ───────────────────────────────────────────────────────── */
+@media (prefers-reduced-motion: reduce) {
+    .meal-card,
+    .stButton > button,
+    .skeleton-shimmer,
+    * {
+        transition-duration: 0.001ms !important;
+        animation-duration: 0.001ms !important;
+        animation-iteration-count: 1 !important;
+    }
+    .meal-card:hover {
+        transform: none !important;
+    }
+    .skeleton-shimmer {
+        animation: none !important;
+        background: var(--border) !important;
     }
 }

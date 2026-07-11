@@ -30,8 +30,13 @@ SHIMMER_CSS = """
 
 
 def inject_shimmer_css() -> None:
+    # st.html(), not st.markdown(unsafe_allow_html=True) — Streamlit strips
+    # <style> tags from markdown-rendered HTML; st.html() is the raw-CSS path.
+    # Wrapped in a hidden <div> — a body that is ONLY a <style> tag gets
+    # special-cased into an ephemeral event container that never persists
+    # in the page DOM (see app/main.py::_inject_css for the same fix).
     if not st.session_state.get("_shimmer_css_injected"):
-        st.markdown(SHIMMER_CSS, unsafe_allow_html=True)
+        st.html(f"<div style='display:none'>{SHIMMER_CSS}</div>")
         st.session_state["_shimmer_css_injected"] = True
 
 
@@ -42,8 +47,8 @@ def render_restaurant_skeleton(n_rows: int = 3) -> str:
         for i in range(n_rows)
     )
     return (
-        '<div class="skeleton-panel">'
-        f'<span style="font-size:11px; color:var(--muted);">{icon("location", 11)} Finding nearby restaurants...</span>'
+        '<div class="skeleton-panel" role="status" aria-busy="true" aria-label="Loading nearby restaurants">'
+        f'<span style="font-size:11px; color:var(--muted);">{icon("location", 11, label="")} Finding nearby restaurants...</span>'
         f"{bars}"
         "</div>"
     )

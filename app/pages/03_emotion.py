@@ -1,17 +1,19 @@
 """
 Page 3 — Emotion Detection.
 
-Two input paths (guide.md Phase 1 & 6):
-  A. Manual: 11-emotion grid → VA coordinates → zone classification
-  B. Voice:  live ~1 minute conversation with a Gemini voice agent collects
-             user-only audio (agent's own speech excluded via a client-side
-             playback gate — see components/voice_conversation), then a
-             single batch call to emotion2vec_plus_large (FunASR) classifies
-             the full collected audio → per-zone probability mass →
-             max-mass zone (bypasses VA step). Classification itself is
-             unchanged from the previous RAVDESS-read flow.
+Single-path flow: a short voice check-in with a Gemini agent is the only
+entry point users see by default. Speech Emotion Recognition (SER)
+classifies the collected audio into one of four affective zones (guide.md
+Phase 1 & 6); the result is shown in plain language plus its per-class
+probability breakdown, with an explicit confirm-or-adjust step, so users
+stay in control when inference errors occur (per the paper's "user can
+correct the detected zone" contribution). Zone codes, valence/arousal, and
+the SER backend name stay hidden from participants; a researcher can reach
+the backend switcher by appending `?debug=1` to the URL.
 
-Russell Circumplex visualisation shown for both paths.
+If SER isn't installed/configured, the manual 11-emotion picker becomes the
+primary (degraded) entry path — see _render_voice_panel()'s fallback branch.
+Classification itself is unchanged from the previous RAVDESS-read flow.
 """
 
 from __future__ import annotations
@@ -23,12 +25,10 @@ import os
 sys.path.insert(0, os.path.dirname(os.path.dirname(os.path.abspath(__file__))))
 
 from components.emotion_selector import render_emotion_selector
-from components.circumplex_plot import render_circumplex
 from components.voice_conversation import render_voice_conversation
-from engine.affect_mapper import emotion_to_va
-from engine.zone_classifier import classify_zone
 from config import ZONE_LABELS, ZONE_PALETTE, EMOTION_COORDS, VOICE_TARGET_SPEECH_S, VOICE_TIMEOUT_S
 from utils.icons import icon, emotion_icon
+from theme import inject_global_theme
 
 
 # ── Helpers ───────────────────────────────────────────────────────────────────
@@ -43,239 +43,86 @@ def _clear_reco_cache() -> None:
         del st.session_state[_k]
 
 
-def _render_zone_badge(zone: str, V: float | None = None, A: float | None = None) -> str:
-    """Return HTML for a coloured zone badge, optionally with VA coords."""
-    zone_label = ZONE_LABELS.get(zone, zone)
-    ramp = ZONE_PALETTE.get(zone, ZONE_PALETTE["NEUTRAL_BASELINE"])
-    va_html = ""
-    if V is not None and A is not None:
-        va_html = (
-            f'<div style="font-size:0.85rem; color:var(--muted); margin-top:6px;">'
-            f'Valence: <b>{V:+.2f}</b> &nbsp; Arousal: <b>{A:+.2f}</b></div>'
-        )
-    return (
-        f'<div style="margin-top:10px;">'
-        f'<span style="background:{ramp["tint"]}; color:{ramp["core"]}; '
-        f'border:1px solid {ramp["core"]}; font-size:11px; font-weight:700; '
-        f'padding:3px 10px; border-radius:var(--radius-pill);">Zone: {zone_label}</span>'
-        f'</div>'
-        f'{va_html}'
-    )
+# Plain-language framing per affective zone — replaces raw probabilities/
+# zone codes/valence-arousal in the default (non-debug) result view.
+# Keyed by the same zone codes classify_zone()/predict_zone_from_audio()
+# already return.
+_ZONE_FRIENDLY = {
+    "Q1_POS_ACT":       ("You sound upbeat and energized.", "Bright, active mood."),
+    "Q2_NEG_ACT":       ("You sound tense or on edge.", "Keyed-up, stressed energy."),
+    "Q3_NEG_DEACT":     ("You sound low-energy and a bit down.", "Flat, tired, subdued."),
+    "NEUTRAL_BASELINE": ("You sound calm and steady.", "Even, baseline mood."),
+}
+
+# Maps a zone to a representative EMOTION_COORDS key when the raw top SER
+# class isn't itself one of the 11 selectable emotions (e.g. CREMA-D's
+# "fearful"/"disgusted" or emotion2vec's "other"/"unknown") — same fallback
+# the confirm handler has always used, shared here so the preview icon and
+# the eventually-committed `detected_emotion` never disagree.
+_ZONE_EMOTION_FALLBACK = {
+    "Q1_POS_ACT": "happy",
+    "Q2_NEG_ACT": "stressed",
+    "Q3_NEG_DEACT": "tired",
+    "NEUTRAL_BASELINE": "neutral",
+}
 
 
-# ── SER voice panel ───────────────────────────────────────────────────────────
+def _display_emotion_for(top_emotion: str, zone: str) -> str:
+    return top_emotion if top_emotion in EMOTION_COORDS else _ZONE_EMOTION_FALLBACK.get(zone, "neutral")
 
-def _render_voice_panel() -> None:
-    """
-    Voice emotion detection panel — live conversation with a Gemini agent.
-    Supports two swappable classification backends:
-      - crema4class: emotion2vec + CREMA-D linear probe (4-class, default)
-      - original:    emotion2vec_plus_large 9-class off-the-shelf
-    The conversation only collects user-only audio; classification is a
-    single batch call to the existing predict_zone_from_audio(), unchanged
-    from the previous RAVDESS-read flow. Renders inside an expander. Updates
-    session state on confirmed use.
-    """
-    from engine.ser_engine import (
-        is_available as ser_available,
-        current_backend,
-        set_backend,
-    )
-    from services.gemini_voice import GeminiVoiceError, is_configured, mint_ephemeral_token
 
-    # ── Backend selector (runtime switch; no restart needed) ──────────────────
+def _render_debug_backend_selector() -> None:
+    """Researcher/debug-only SER backend switcher — a researcher/debug
+    control, not part of the "have a conversation" moment. Hidden from
+    participants behind `?debug=1` so it never competes with the check-in
+    flow (previously a small popover on every visit)."""
+    from engine.ser_engine import current_backend, set_backend
+
     _BACKEND_OPTIONS = {
         "crema4class": "CREMA-D probe — 4-class",
         "original":    "Original 9-class (emotion2vec_plus_large off-the-shelf)",
     }
     _cur_id = current_backend()["id"]
-    selected_id = st.selectbox(
-        "SER Backend",
-        options=list(_BACKEND_OPTIONS.keys()),
-        index=list(_BACKEND_OPTIONS.keys()).index(_cur_id),
-        format_func=lambda k: _BACKEND_OPTIONS[k],
-        key="ser_backend_selector",
-        help="Switch between SER backends without restarting. "
-             "CREMA-D probe is the Phase 7 upgrade (higher valence CCC); "
-             "Original is the Phase 1 baseline.",
-        label_visibility="collapsed",
-    )
+    with st.popover("Backend", icon=":material/tune:"):
+        selected_id = st.selectbox(
+            "SER Backend",
+            options=list(_BACKEND_OPTIONS.keys()),
+            index=list(_BACKEND_OPTIONS.keys()).index(_cur_id),
+            format_func=lambda k: _BACKEND_OPTIONS[k],
+            key="ser_backend_selector",
+            help="Switch between SER backends without restarting. "
+                 "CREMA-D probe is the Phase 7 upgrade (higher valence CCC); "
+                 "Original is the Phase 1 baseline.",
+        )
     if selected_id != _cur_id:
         set_backend(selected_id)
         # Clear any pending SER result from the previous backend
         for k in ("_ser_zone_pending", "_ser_probs_pending", "_ser_top_emotion"):
             st.session_state.pop(k, None)
 
-    backend = current_backend()
 
-    with st.expander(
-        f"Voice Emotion Detection — {backend['label']}",
-        icon=":material/mic:",
-        expanded=False,
-    ):
-        st.caption(
-            "Have a short, natural ~1 minute chat with a voice agent about your day. "
-            "Nothing to read or rehearse — just talk. Only your voice is analysed; "
-            "the agent's own responses never reach the emotion model."
-        )
-
-        if not ser_available():
-            st.warning(
-                "SER module not installed. "
-                "Run `pip install funasr modelscope` and restart to enable voice detection.",
-                icon=":material/warning:",
-            )
-        elif not is_configured():
-            st.warning(
-                "Voice check-in is not configured. Add `GEMINI_API_KEY` to your `.env` "
-                "file to enable the live conversation.",
-                icon=":material/warning:",
-            )
-        elif "_ser_zone_pending" not in st.session_state:
-            # ── Conversation phase ───────────────────────────────────────────
-            if "_voice_component_seq" not in st.session_state:
-                st.session_state["_voice_component_seq"] = 0
-
-            if "_voice_token" not in st.session_state:
-                try:
-                    st.session_state["_voice_token"] = mint_ephemeral_token()
-                except GeminiVoiceError as exc:
-                    st.error(f"Could not start the voice check-in: {exc}")
-
-            token = st.session_state.get("_voice_token")
-            if token is not None:
-                result = render_voice_conversation(
-                    target_speech_s=VOICE_TARGET_SPEECH_S,
-                    timeout_s=VOICE_TIMEOUT_S,
-                    client_secret=token["client_secret"],
-                    model=token["model"],
-                    voice=token["voice"],
-                    ws_url=token["ws_url"],
-                    key=f"voice_conv_{st.session_state['_voice_component_seq']}",
-                )
-
-                if result is not None:
-                    # ── Analysis phase ───────────────────────────────────────
-                    # The conversation collected user-only audio; classification
-                    # is the SAME single batch call the RAVDESS flow used.
-                    with st.spinner(f"Analysing emotion via {backend['label']}..."):
-                        try:
-                            from engine.ser_engine import predict_zone_from_audio
-                            audio_bytes = base64.b64decode(result["audio_b64"])
-                            zone, probs = predict_zone_from_audio(audio_bytes)
-                            sorted_probs = sorted(probs.items(), key=lambda x: x[1], reverse=True)
-                            st.session_state["_ser_zone_pending"] = zone
-                            st.session_state["_ser_probs_pending"] = probs
-                            st.session_state["_ser_top_emotion"] = sorted_probs[0][0]
-                            st.session_state.pop("_voice_token", None)
-                            st.rerun()
-                        except ImportError as exc:
-                            st.warning(f"SER not available: {str(exc)[:120]}")
-                        except RuntimeError as exc:
-                            st.error(
-                                f"Voice analysis failed — try redoing the conversation. "
-                                f"Details: {str(exc)[:200]}"
-                            )
-
-        # ── Display phase ────────────────────────────────────────────────────
-        # Always renders from cached session state — no model call here.
-        if "_ser_zone_pending" in st.session_state:
-            zone = st.session_state["_ser_zone_pending"]
-            probs = st.session_state["_ser_probs_pending"]
-            sorted_probs = sorted(probs.items(), key=lambda x: x[1], reverse=True)
-
-            st.markdown(f"**{backend['n_classes']}-class emotion probabilities:**")
-            for emo, prob in sorted_probs:
-                st.progress(
-                    min(prob, 1.0),
-                    text=f"{emo.capitalize()}: {prob:.1%}",
-                )
-
-            ramp = ZONE_PALETTE.get(zone, ZONE_PALETTE["NEUTRAL_BASELINE"])
-            zone_label = ZONE_LABELS.get(zone, zone)
-            st.markdown(
-                f'<div style="margin-top:12px; padding:10px; '
-                f'background:{ramp["tint"]}; border:1px solid {ramp["core"]}; '
-                f'border-radius:var(--radius-md);">'
-                f'<span style="font-size:12px; font-weight:700; color:{ramp["core"]};">'
-                f'Detected Zone: {zone_label}</span>'
-                f'<div style="font-size:11px; color:var(--muted); margin-top:4px;">'
-                f'Top emotion: {sorted_probs[0][0].capitalize()} '
-                f'({sorted_probs[0][1]:.1%} confidence)</div>'
-                f'</div>',
-                unsafe_allow_html=True,
-            )
-
-            # Post-hoc supportive note — additive only; classification already
-            # happened, this never blocks or replaces the normal result.
-            if zone in ("Q2_NEG_ACT", "Q3_NEG_DEACT") and sorted_probs[0][1] >= 0.4:
-                st.info(
-                    "If you're going through a hard time, you're not alone — the "
-                    "988 Suicide & Crisis Lifeline (call or text **988**, US) is "
-                    "available 24/7.",
-                    icon=":material/favorite:",
-                )
-
-            st.markdown("<div style='margin-top:16px;'></div>", unsafe_allow_html=True)
-
-            col_confirm, col_discard = st.columns(2)
-            with col_confirm:
-                if st.button("Use voice result", type="primary", key="confirm_ser"):
-                    _clear_reco_cache()
-                    top_emo = st.session_state.pop("_ser_top_emotion", "neutral")
-                    _zone_fallback = {
-                        "Q1_POS_ACT": "happy",
-                        "Q2_NEG_ACT": "stressed",
-                        "Q3_NEG_DEACT": "tired",
-                        "NEUTRAL_BASELINE": "neutral",
-                    }
-                    display_emotion = (
-                        top_emo
-                        if top_emo in EMOTION_COORDS
-                        else _zone_fallback.get(zone, "neutral")
-                    )
-                    st.session_state["detected_emotion"] = display_emotion
-                    st.session_state["ser_zone"]  = st.session_state.pop("_ser_zone_pending", zone)
-                    st.session_state["ser_probs"] = st.session_state.pop("_ser_probs_pending", probs)
-                    st.session_state["_voice_component_seq"] += 1
-                    st.rerun()
-            with col_discard:
-                if st.button("Redo conversation", key="discard_ser"):
-                    for k in ("_ser_zone_pending", "_ser_probs_pending", "_ser_top_emotion", "_voice_token"):
-                        st.session_state.pop(k, None)
-                    st.session_state["_voice_component_seq"] += 1
-                    st.rerun()
-
-        # Show current SER-assigned zone if active
-        if st.session_state.get("ser_zone"):
-            sz = st.session_state["ser_zone"]
-            st.success(
-                f"Voice zone active: **{ZONE_LABELS.get(sz, sz)}** — "
-                "this overrides zone classification for recommendations.",
-                icon=":material/check_circle:",
-            )
-            if st.button("Clear voice result", key="clear_ser"):
-                for k in ("ser_zone", "ser_probs"):
-                    st.session_state.pop(k, None)
-                _clear_reco_cache()
-                st.rerun()
-
-
-# ── Main page ─────────────────────────────────────────────────────────────────
-
-def show():
-    st.title("How are you feeling right now?")
+def _render_result_card(zone: str, top_emotion: str) -> None:
+    """Friendly, non-technical framing of the detected affective zone."""
+    ramp = ZONE_PALETTE.get(zone, ZONE_PALETTE["NEUTRAL_BASELINE"])
+    headline, sub = _ZONE_FRIENDLY.get(zone, ("Here's what we picked up.", ""))
+    face = emotion_icon(_display_emotion_for(top_emotion, zone), size=40, color=ramp["accent"], label="")
     st.markdown(
-        "Your emotional state guides which nutrients your body may benefit from. "
-        "Select your emotion below, or record your voice for automatic detection."
+        f'<div class="card--hero" style="text-align:left; '
+        f'background:{ramp["tint"]}; border:1px solid {ramp["core"]}44;">'
+        f'<div style="margin-bottom:10px;">{face}</div>'
+        f'<div style="font-family:var(--font-display); font-size:1.35rem; font-weight:700; color:var(--ink);">'
+        f'{headline}</div>'
+        f'<div style="font-size:0.9rem; color:var(--muted); margin-top:4px;">{sub}</div>'
+        f'</div>',
+        unsafe_allow_html=True,
     )
 
-    _render_voice_panel()
 
-    st.divider()
-    st.markdown("**Select your emotion:**")
-
-    _prev_emotion = st.session_state.get("detected_emotion")  # snapshot before component writes
+def _render_manual_path() -> None:
+    """Manual 11-emotion picker — a correction affordance shown only after
+    a voice result (state E), or the primary path when SER is unavailable/
+    unconfigured (degraded entry). Never an upfront, equal-weight tab."""
+    _prev_emotion = st.session_state.get("detected_emotion")
     newly_selected = render_emotion_selector(selected=_prev_emotion)
     if newly_selected:
         # Manual selection clears any prior SER zone; compare against pre-component snapshot
@@ -283,78 +130,226 @@ def show():
             for k in ("ser_zone", "ser_probs"):
                 st.session_state.pop(k, None)
         st.session_state["detected_emotion"] = newly_selected
+        # A manual pick resolves any in-flight "adjust" review — the same
+        # pending-state cleanup "Redo conversation" already performs when a
+        # voice result is fully discarded.
+        if st.session_state.get("_show_manual_correct"):
+            for k in ("_ser_zone_pending", "_ser_probs_pending", "_ser_top_emotion", "_show_manual_correct"):
+                st.session_state.pop(k, None)
+            st.rerun()
+
+
+# ── SER voice panel ───────────────────────────────────────────────────────────
+
+def _render_voice_panel() -> None:
+    """
+    Voice emotion detection — live conversation with a Gemini agent, the
+    page's sole default entry point. Supports two swappable classification
+    backends (crema4class / original), switchable only via `?debug=1`. The
+    conversation only collects user-only audio; classification is a single
+    batch call to the existing predict_zone_from_audio(), unchanged from
+    the previous RAVDESS-read flow.
+    """
+    from engine.ser_engine import is_available as ser_available, current_backend
+    from services.gemini_voice import GeminiVoiceError, is_configured, mint_ephemeral_token
+
+    if st.query_params.get("debug") == "1":
+        _render_debug_backend_selector()
+
+    backend = current_backend()
+
+    if not ser_available():
+        st.warning(
+            "SER module not installed. "
+            "Run `pip install funasr modelscope` and restart to enable voice detection.",
+            icon=":material/warning:",
+        )
+        st.markdown("**Select how you're feeling:**")
+        _render_manual_path()
+        return
+
+    if not is_configured():
+        st.warning(
+            "Voice check-in is not configured. Add `GEMINI_API_KEY` to your `.env` "
+            "file to enable the live conversation.",
+            icon=":material/warning:",
+        )
+        st.markdown("**Select how you're feeling:**")
+        _render_manual_path()
+        return
+
+    show_manual_correct = st.session_state.get("_show_manual_correct", False)
+
+    # ── State C/D — a voice result is awaiting the user's decision ─────────
+    if "_ser_zone_pending" in st.session_state:
+        zone = st.session_state["_ser_zone_pending"]
+        probs = st.session_state["_ser_probs_pending"]
+        sorted_probs = sorted(probs.items(), key=lambda x: x[1], reverse=True)
+        top_emotion = sorted_probs[0][0]
+
+        _render_result_card(zone, top_emotion)
+
+        st.markdown(f"**{backend['n_classes']}-class emotion probabilities**")
+        for emo, prob in sorted_probs:
+            st.progress(min(prob, 1.0), text=f"{emo.capitalize()}: {prob:.1%}")
+
+        if show_manual_correct:
+            st.markdown("**Pick the mood that fits better:**")
+            _render_manual_path()
+            if st.button("← Back to voice result", key="cancel_adjust_pending"):
+                st.session_state["_show_manual_correct"] = False
+                st.rerun()
+        else:
+            col_yes, col_adjust, col_redo = st.columns(3)
+            with col_yes:
+                if st.button("Yes, that's right →", type="primary", key="confirm_ser", use_container_width=True):
+                    _clear_reco_cache()
+                    top_emo = st.session_state.pop("_ser_top_emotion", "neutral")
+                    display_emotion = _display_emotion_for(top_emo, zone)
+                    st.session_state["detected_emotion"] = display_emotion
+                    st.session_state["ser_zone"]  = st.session_state.pop("_ser_zone_pending", zone)
+                    st.session_state["ser_probs"] = st.session_state.pop("_ser_probs_pending", probs)
+                    st.session_state["_voice_component_seq"] += 1
+                    st.rerun()
+            with col_adjust:
+                if st.button("Not quite — adjust", key="adjust_ser", use_container_width=True):
+                    st.session_state["_show_manual_correct"] = True
+                    st.rerun()
+            with col_redo:
+                if st.button("Redo conversation", key="discard_ser", use_container_width=True):
+                    for k in ("_ser_zone_pending", "_ser_probs_pending", "_ser_top_emotion", "_voice_token"):
+                        st.session_state.pop(k, None)
+                    st.session_state["_show_manual_correct"] = False
+                    st.session_state["_voice_component_seq"] += 1
+                    st.rerun()
+        return
+
+    # ── Already confirmed — a voice-assigned zone is active ─────────────────
+    if st.session_state.get("ser_zone"):
+        sz = st.session_state["ser_zone"]
+        st.success(
+            f"Voice zone active: **{ZONE_LABELS.get(sz, sz)}** — "
+            "this overrides zone classification for recommendations.",
+            icon=":material/check_circle:",
+        )
+        if show_manual_correct:
+            st.markdown("**Pick the mood that fits better:**")
+            _render_manual_path()
+            if st.button("← Keep voice result", key="cancel_adjust_confirmed"):
+                st.session_state["_show_manual_correct"] = False
+                st.rerun()
+        else:
+            col_adjust, col_clear = st.columns(2)
+            with col_adjust:
+                if st.button("Adjust mood", icon=":material/edit:", key="adjust_confirmed_ser", use_container_width=True):
+                    st.session_state["_show_manual_correct"] = True
+                    st.rerun()
+            with col_clear:
+                if st.button("Clear voice result", key="clear_ser", use_container_width=True):
+                    for k in ("ser_zone", "ser_probs"):
+                        st.session_state.pop(k, None)
+                    _clear_reco_cache()
+                    st.session_state["_show_manual_correct"] = False
+                    st.rerun()
+        return
+
+    # ── State A — idle, the voice hero is the only entry point ─────────────
+    st.markdown(
+        '<p style="color:var(--muted); font-size:0.95rem; max-width:520px;">'
+        "Have a short, natural voice check-in — about a minute of easy "
+        "conversation. We listen only to <i>how</i> you sound, never the "
+        "words, to match meals to your mood. Nothing to read or rehearse.</p>",
+        unsafe_allow_html=True,
+    )
+
+    if "_voice_component_seq" not in st.session_state:
+        st.session_state["_voice_component_seq"] = 0
+
+    if "_voice_token" not in st.session_state:
+        try:
+            st.session_state["_voice_token"] = mint_ephemeral_token()
+        except GeminiVoiceError as exc:
+            st.error(f"Could not start the voice check-in: {exc}")
+
+    token = st.session_state.get("_voice_token")
+    if token is not None:
+        result = render_voice_conversation(
+            target_speech_s=VOICE_TARGET_SPEECH_S,
+            timeout_s=VOICE_TIMEOUT_S,
+            client_secret=token["client_secret"],
+            model=token["model"],
+            voice=token["voice"],
+            ws_url=token["ws_url"],
+            key=f"voice_conv_{st.session_state['_voice_component_seq']}",
+        )
+
+        st.markdown(
+            '<div style="display:flex; justify-content:center; gap:12px; flex-wrap:wrap; margin-top:8px;">'
+            f'<span class="chip">{icon("mic", 13, label="")} Only your voice is analyzed</span>'
+            f'<span class="chip">{icon("clock", 13, label="")} ~1 minute</span>'
+            f'<span class="chip">{icon("redo", 13, label="")} You can redo it</span>'
+            '</div>',
+            unsafe_allow_html=True,
+        )
+
+        if result is not None:
+            # ── Analysis phase ───────────────────────────────────────
+            # The conversation collected user-only audio; classification
+            # is the SAME single batch call the RAVDESS flow used.
+            with st.spinner(f"Analysing emotion via {backend['label']}..."):
+                try:
+                    from engine.ser_engine import predict_zone_from_audio
+                    audio_bytes = base64.b64decode(result["audio_b64"])
+                    zone, probs = predict_zone_from_audio(audio_bytes)
+                    sorted_probs = sorted(probs.items(), key=lambda x: x[1], reverse=True)
+                    st.session_state["_ser_zone_pending"] = zone
+                    st.session_state["_ser_probs_pending"] = probs
+                    st.session_state["_ser_top_emotion"] = sorted_probs[0][0]
+                    st.session_state.pop("_voice_token", None)
+                    st.rerun()
+                except ImportError as exc:
+                    st.warning(f"SER not available: {str(exc)[:120]}")
+                except RuntimeError as exc:
+                    st.error(
+                        f"Voice analysis failed — try redoing the conversation. "
+                        f"Details: {str(exc)[:200]}"
+                    )
+
+
+# ── Main page ─────────────────────────────────────────────────────────────────
+
+def show():
+    inject_global_theme()
+    st.title("How are you feeling right now?")
+    st.markdown(
+        "Your emotional state guides which nutrients your body may benefit from."
+    )
+
+    _render_voice_panel()
 
     current_emotion = st.session_state.get("detected_emotion")
-
-    # ── Circumplex + Zone info ─────────────────────────────────────────────
-    col_plot, col_info = st.columns([3, 2])
-    with col_plot:
-        fig = render_circumplex(selected_emotion=current_emotion)
-        st.plotly_chart(fig, use_container_width=True, config={"displayModeBar": False})
-
-    with col_info:
-        if current_emotion:
-            ser_zone = st.session_state.get("ser_zone")
-
-            if ser_zone:
-                # SER path: show voice-detected zone
-                zone = ser_zone
-                meta = EMOTION_COORDS.get(current_emotion, {"color": "var(--muted)"})
-                badge_html = _render_zone_badge(zone)
-                face = emotion_icon(current_emotion, size=36, color=meta["color"])
-                st.markdown(
-                    f'<div style="background:var(--surface); border:1px solid var(--border); '
-                    f'border-radius:var(--radius-md); padding:16px; margin-top:20px;">'
-                    f'<div style="margin-bottom:8px;">{face}</div>'
-                    f'<div style="font-family:var(--font-display); font-size:1.2rem; font-weight:700; color:var(--ink);">'
-                    f'{current_emotion.capitalize()}</div>'
-                    f'<div style="font-size:0.8rem; color:var(--brand); margin-top:4px;">{icon("mic", 13)} Voice-detected zone</div>'
-                    f'{badge_html}'
-                    f'</div>',
-                    unsafe_allow_html=True,
-                )
-            else:
-                # Manual path: VA coordinates → zone
-                try:
-                    V, A = emotion_to_va(current_emotion)
-                    zone = classify_zone(V, A)
-                    meta = EMOTION_COORDS[current_emotion]
-                    badge_html = _render_zone_badge(zone, V, A)
-                except (ValueError, KeyError):
-                    zone = "NEUTRAL_BASELINE"
-                    meta = {"color": "var(--muted)"}
-                    badge_html = _render_zone_badge(zone)
-
-                face = emotion_icon(current_emotion, size=36, color=meta["color"])
-                st.markdown(
-                    f'<div style="background:var(--surface); border:1px solid var(--border); '
-                    f'border-radius:var(--radius-md); padding:16px; margin-top:20px;">'
-                    f'<div style="margin-bottom:8px;">{face}</div>'
-                    f'<div style="font-family:var(--font-display); font-size:1.2rem; font-weight:700; color:var(--ink);">'
-                    f'{current_emotion.capitalize()}</div>'
-                    f'{badge_html}'
-                    f'</div>',
-                    unsafe_allow_html=True,
-                )
-
-            confidence = st.slider(
-                "How confident are you in this emotion? (for research data)",
-                min_value=1, max_value=5, value=3, step=1,
-                format="%d/5",
-            )
-            st.session_state["emotion_confidence"] = confidence / 5.0
-        else:
-            st.info("Select an emotion above to see its affective zone.")
 
     st.divider()
 
     if current_emotion:
-        if st.button("Get Recommendations →", type="primary"):
+        # Voice-confirmed already announces the zone via its own success
+        # banner above; only add this line for the manual/degraded/adjusted
+        # paths, where nothing else names what's about to be used.
+        if not st.session_state.get("ser_zone"):
+            st.markdown(
+                '<div style="display:flex; align-items:center; gap:8px; margin-bottom:12px;">'
+                f'{emotion_icon(current_emotion, size=28, color="var(--brand)", label="")}'
+                f'<span style="font-weight:600; color:var(--ink);">Proceeding as: {current_emotion.capitalize()}</span>'
+                '</div>',
+                unsafe_allow_html=True,
+            )
+
+        if st.button("Get Recommendations →", type="primary", use_container_width=True):
             _clear_reco_cache()
             st.switch_page("pages/04_recommendations.py")
     else:
-        st.button("Get Recommendations →", disabled=True)
-        st.caption("Please select an emotion first.")
+        st.button("Get Recommendations →", disabled=True, use_container_width=True)
+        st.caption("Please complete the check-in above first.")
 
 
 show()

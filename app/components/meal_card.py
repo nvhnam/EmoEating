@@ -33,6 +33,9 @@ def render_meal_card(
     cuisine = food.get("cuisine") or ""
     kcal = food.get("calories_kcal")
     score = food.get("enms", food.get("final_score", 0.0))
+    score_macro = food.get("macro_score")
+    score_micro = food.get("micro_score")
+    score_pref = food.get("pref_score")
     macro_breakdown = food.get("macro_breakdown", {})
     prep = food.get("prep_time_min")
     cook = food.get("cook_time_min")
@@ -67,14 +70,16 @@ def render_meal_card(
             bar_w = int(pct * 100)
             kcal_html = (
                 f'<div style="margin:8px 0 8px 0;">'
-                f'<span style="font-size:13px; color:var(--ink);">{kcal_str}</span>'
-                f'<span style="font-size:11px; color:var(--muted);"> / target {fmt_kcal(meal_kcal_target)}</span>'
-                f'<div style="background:var(--border); border-radius:3px; height:4px; margin-top:4px;">'
+                f'<span class="num" style="font-size:13px; color:var(--ink);">{kcal_str}</span>'
+                f'<span class="num" style="font-size:11px; color:var(--muted);"> / target {fmt_kcal(meal_kcal_target)}</span>'
+                f'<div role="progressbar" aria-label="Calorie match to target" '
+                f'aria-valuenow="{bar_w}" aria-valuemin="0" aria-valuemax="100" '
+                f'style="background:var(--border); border-radius:3px; height:4px; margin-top:4px;">'
                 f'<div style="width:{bar_w}%; background:var(--brand); height:100%; border-radius:3px;"></div>'
                 f'</div></div>'
             )
         else:
-            kcal_html = f'<div style="font-size:13px; color:var(--ink); margin:8px 0 6px 0;">{kcal_str}</div>'
+            kcal_html = f'<div class="num" style="font-size:13px; color:var(--ink); margin:8px 0 6px 0;">{kcal_str}</div>'
 
     # Macro fulfillment chips (actual / target per macro)
     chips_html = ""
@@ -90,7 +95,7 @@ def render_meal_card(
                 f'border:1px solid {color_var}; font-size:10px; font-weight:600; '
                 f'padding:3px 8px; border-radius:var(--radius-pill); margin-right:4px; '
                 f'display:inline-block; margin-bottom:4px;">'
-                f'{label}: {actual}g / {target}g ({pct}%)</span>'
+                f'{label}: <span class="num">{actual}g / {target}g ({pct}%)</span></span>'
             )
 
     # Time + dietary flags
@@ -111,17 +116,51 @@ def render_meal_card(
         if meta_line else ""
     )
 
+    # ENMS component breakdown — keeps the score traceable to its 3 inputs
+    # (macro/micro/preference) rather than a single opaque number, per the
+    # paper's transparency claim. Purely presentational: reads existing
+    # food["macro_score"|"micro_score"|"pref_score"], computes nothing.
+    breakdown_html = ""
+    if score_macro is not None and score_micro is not None and score_pref is not None:
+        breakdown_html = (
+            f'<div class="num" style="font-size:10px; color:var(--muted); margin-top:2px;">'
+            f'macro {fmt_score(score_macro)} &middot; micro {fmt_score(score_micro)} '
+            f'&middot; preference {fmt_score(score_pref)}</div>'
+        )
+
+    is_top = rank == 1
+    card_class = "meal-card meal-card--hero" if is_top else "meal-card"
+    # Rank medal chip — mono digit, distinct fill for #1 so hierarchy isn't
+    # carried by the card border alone (fixes color-only + adds a legible
+    # "this is the best match" signal for screen readers via the text itself).
+    medal_bg = "var(--brand)" if is_top else "var(--surface)"
+    medal_fg = "#ffffff" if is_top else "var(--muted)"
+    rank_badge = (
+        f'<span class="num" style="background:{medal_bg}; color:{medal_fg}; font-size:11px; '
+        f'font-weight:700; padding:2px 8px; border-radius:var(--radius-pill); '
+        f'border:1px solid {"transparent" if is_top else "var(--border)"};">#{rank}</span>'
+    )
+    top_badge = (
+        f'<span style="background:var(--brand-tint); color:var(--brand); font-size:10px; font-weight:700; '
+        f'padding:2px 8px; border-radius:var(--radius-pill); margin-left:8px; '
+        f'white-space:nowrap; display:inline-block; vertical-align:middle;">Top match</span>'
+        if is_top else ""
+    )
+
     with st.container():
         st.markdown(
-            f'<div class="meal-card">'
+            f'<div class="{card_class}">'
             f'<div style="display:flex; justify-content:space-between; align-items:flex-start;">'
             f'<div>'
-            f'<span style="font-size:11px; color:var(--muted); font-weight:600;">#{rank}</span>'
-            f'<span style="font-family:var(--font-display); font-size:18px; font-weight:700; color:var(--ink); margin-left:6px;">{safe_name}</span>'
-            f'{cuisine_span}'
+            f'{rank_badge}'
+            f'<span style="font-family:var(--font-display); font-size:clamp(15px,4.2vw,18px); font-weight:700; color:var(--ink); margin-left:8px;">{safe_name}</span>'
+            f'{cuisine_span}{top_badge}'
             f'{vn_name_html}'
             f'</div>'
-            f'<span style="background:var(--brand-tint); color:var(--brand); font-size:11px; font-weight:600; padding:3px 10px; border-radius:var(--radius-pill); white-space:nowrap;">ENMS {fmt_score(score)}</span>'
+            f'<div style="text-align:right;">'
+            f'<span class="num" style="background:var(--brand-tint); color:var(--brand); font-size:11px; font-weight:600; padding:3px 10px; border-radius:var(--radius-pill); white-space:nowrap;">ENMS {fmt_score(score)}</span>'
+            f'{breakdown_html}'
+            f'</div>'
             f'</div>'
             f'{kcal_html}'
             f'{chips_html}'
@@ -156,7 +195,7 @@ def render_meal_card(
                 for label, val in nutrient_rows:
                     st.markdown(
                         f'<div style="display:flex;justify-content:space-between;font-size:12px;">'
-                        f'<span style="color:var(--muted)">{label}</span><span>{val}</span></div>',
+                        f'<span style="color:var(--muted)">{label}</span><span class="num">{val}</span></div>',
                         unsafe_allow_html=True,
                     )
             with detail_col2:
@@ -171,7 +210,7 @@ def render_meal_card(
                             f'<div style="display:flex; justify-content:space-between; '
                             f'font-size:11px; color:var(--muted); margin-bottom:2px;">'
                             f'<span>{n_label}</span>'
-                            f'<span>{item["actual"]:.1f} ({pct:.0f}% RDA/meal)</span></div>',
+                            f'<span class="num">{item["actual"]:.1f} ({pct:.0f}% RDA/meal)</span></div>',
                             unsafe_allow_html=True,
                         )
 
