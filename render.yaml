@@ -1,0 +1,29 @@
+# Render Blueprint — deploys the SER inference server (server/), a FALLBACK
+# only needed if in-process SER doesn't fit your actual Streamlit Cloud RAM
+# quota (the default config.py now targets the smaller emotion2vec_plus_seed
+# backbone specifically so in-process is the primary path — see README.md's
+# "Deploying to Streamlit Community Cloud" section). Docker build context is
+# the repo root (not server/), because server/Dockerfile COPYs app/ as a
+# sibling directory — that's what keeps server-side inference byte-identical
+# to local dev (see server/README.md). This server shares app/config.py, so
+# it automatically uses whatever SER_MODEL_ID/SER_BACKEND are set there.
+#
+# Deploy: Render dashboard → New → Blueprint → select this repo/branch →
+# Render auto-detects this file. SER_SERVER_TOKEN is marked sync:false so it
+# is NOT committed here — set it manually in the Render dashboard after the
+# first deploy, then set the matching SER_REMOTE_TOKEN in Streamlit Cloud's
+# app secrets.
+services:
+  - type: web
+    name: emoeating-ser-server
+    runtime: docker
+    dockerfilePath: server/Dockerfile
+    dockerContext: .
+    plan: pro          # 4 GB RAM — sized for the original emotion2vec_plus_large
+                        # config; the current default (smaller seed backbone)
+                        # likely needs less. Not re-verified at the smaller
+                        # size — measure before downgrading to `standard` (2GB).
+    healthCheckPath: /health
+    envVars:
+      - key: SER_SERVER_TOKEN
+        sync: false

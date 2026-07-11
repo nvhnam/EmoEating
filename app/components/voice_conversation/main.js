@@ -18,7 +18,24 @@
  * Gemini's audio starts arriving, and only reopens once the *scheduled*
  * playback has actually finished (AudioBufferSourceNode.onended) — not
  * merely when the turnComplete message arrives, since audio is scheduled
- * into the future via a playHead pointer.
+ * into the future via a playHead pointer. armGateWatchdog()/AGENT_TURN_MAX_MS
+ * is a bounded safety net in case that onended/turnComplete signal is ever
+ * dropped or delayed — without it, a single missed close silently wedges
+ * the gate shut for the rest of the session (mic frames stop being sent
+ * AND the waveform stops reflecting the user's mic, since both are gated
+ * by the same `speaking` flag).
+ *
+ * ensureAudioContextsRunning()/scheduleMicHealthCheck() guard a separate,
+ * unrelated failure mode: getUserMedia()'s permission prompt and
+ * audioWorklet.addModule()'s network fetch are both async steps that run
+ * BEFORE audioCtxIn.resume() is ever called, in a function invoked from a
+ * user gesture (the mic button click) — on some browsers that's enough
+ * intervening async work to silently erode the gesture association, so
+ * resume() can leave audioCtxIn (mic capture) permanently suspended even
+ * though audioCtxOut (agent playback) resumes fine. Symptom: you can hear
+ * the agent, but your own mic frames never reach the worklet at all —
+ * nothing is sent to Gemini, and analyserIn reads frozen data, so the
+ * waveform never reflects your voice either.
  */
 (function () {
   'use strict';
@@ -59,8 +76,8 @@
   // Config (populated from Streamlit args on each render)
   // ---------------------------------------------------------------------
   const CONFIG = {
-    targetSpeechS: 50,
-    timeoutS: 100,
+    targetSpeechS: 30,
+    timeoutS: 50,
     clientSecret: '',
     model: '',
     voice: '',
@@ -169,6 +186,7 @@
   // ---------------------------------------------------------------------
   function onWorkletFrame(int16Frame) {
     if (!started || finished) return;
+    framesReceived++;
     if (speaking) return; // agent-voice gate
 
     if (ws && ws.readyState === WebSocket.OPEN && setupDone) {
@@ -214,6 +232,12 @@
     document.body.classList.toggle('is-speaking', speaking);
     document.body.classList.toggle('is-wrapping', wrappingUp);
     if (REDUCED_MOTION) drawWaveformFrame(); // discrete redraw on each state tick
+    // Enforce the wall-clock cap even while the agent is speaking: mic frames are
+    // gated off then, so onWorkletFrame()'s maybeAutoWrapUp() cannot fire. progressTimer
+    // ticks this every 400ms regardless of who is speaking, so the total-conversation
+    // budget is honored within ~0.4s. wrapUp()/maybeAutoWrapUp() are self-guarded
+    // (wrappingUp / !started / finished), so this is safe to call unconditionally here.
+    if (started && !finished) maybeAutoWrapUp();
   }
 
   // ---------------------------------------------------------------------
@@ -416,6 +440,7 @@
         if (!speaking) {
           speaking = true;
           updateProgressUI();
+          armGateWatchdog();
         }
         playPcm(b64decode(p.inlineData.data));
       }
@@ -438,7 +463,35 @@
     }
   }
 
+  // Safety net: the gate is designed to reopen via AudioBufferSourceNode's
+  // onended firing after turnComplete (see the file-level doc comment) —
+  // correct, but entirely dependent on that event actually firing. If it
+  // doesn't (dropped/malformed turnComplete, a browser onended quirk, etc.)
+  // `speaking` stays true forever: onWorkletFrame's gate check then silently
+  // drops every mic frame (nothing reaches Gemini) and the waveform is stuck
+  // showing the now-silent agent analyser instead of the user's mic — this
+  // reproduces exactly as "AI doesn't respond, waveform frozen." A generous
+  // but bounded timeout guarantees the gate can never wedge the whole session.
+  const AGENT_TURN_MAX_MS = 20000;
+  let gateWatchdogHandle = null;
+
+  function armGateWatchdog() {
+    if (gateWatchdogHandle) clearTimeout(gateWatchdogHandle);
+    gateWatchdogHandle = setTimeout(() => {
+      console.warn('[voice_conversation] gate watchdog fired — agent turn exceeded', AGENT_TURN_MAX_MS, 'ms without a normal close; forcing the gate back open.');
+      closeGate();
+    }, AGENT_TURN_MAX_MS);
+  }
+
+  function disarmGateWatchdog() {
+    if (gateWatchdogHandle) {
+      clearTimeout(gateWatchdogHandle);
+      gateWatchdogHandle = null;
+    }
+  }
+
   function closeGate() {
+    disarmGateWatchdog();
     if (!speaking) {
       // No agent audio was actually playing (e.g. a text-only ack) — if we
       // were waiting to wrap up, finalize now since there is nothing to wait for.
@@ -488,6 +541,19 @@
       return;
     }
 
+    // getUserMedia() succeeding doesn't guarantee a usable track — a track
+    // can exist but already be 'ended' (device unplugged/revoked mid-prompt)
+    // or muted at the OS level. Fail loudly here instead of silently
+    // producing zero frames later with no explanation.
+    const micTrack = micStream.getAudioTracks()[0];
+    if (!micTrack || micTrack.readyState !== 'live') {
+      setStatus('No usable microphone track — check your device is connected and not in use by another app, then try again.');
+      if (els.startBtn) els.startBtn.disabled = false;
+      cleanup();
+      return;
+    }
+    console.info('[voice_conversation] mic track:', micTrack.label || '(unlabeled)', 'muted=', micTrack.muted);
+
     try {
       audioCtxIn = new (window.AudioContext || window.webkitAudioContext)();
       await audioCtxIn.audioWorklet.addModule('./emotion-worklet.js');
@@ -515,28 +581,20 @@
     analyserOut.fftSize = 128;
     analyserOut.smoothingTimeConstant = 0.75;
     analyserOut.connect(audioCtxOut.destination);
-    try {
-      await audioCtxOut.resume();
-    } catch (e) {
-      /* noop */
-    }
-    try {
-      await audioCtxIn.resume();
-    } catch (e) {
-      /* noop */
-    }
-    // Belt-and-suspenders: startSession() only runs from the mic button's
-    // click handler, which is already a user gesture, so resume() above
-    // should always succeed — but if a browser still leaves either context
-    // suspended, retry on the next document click rather than leaving the
-    // waveform silently frozen for the rest of the session.
-    if ((audioCtxOut && audioCtxOut.state === 'suspended') || (audioCtxIn && audioCtxIn.state === 'suspended')) {
-      const resumeAll = () => {
-        if (audioCtxOut && audioCtxOut.state === 'suspended') audioCtxOut.resume().catch(() => {});
-        if (audioCtxIn && audioCtxIn.state === 'suspended') audioCtxIn.resume().catch(() => {});
-      };
-      document.addEventListener('click', resumeAll, { once: true });
-    }
+
+    // Root-cause fix: getUserMedia()'s permission prompt and addModule()'s
+    // network fetch are both async steps BEFORE we ever call resume() — on
+    // several browsers (notably Safari, and Chrome under stricter autoplay
+    // policies) that's enough intervening async work to erode the original
+    // click's "user activation," so resume() can silently stay suspended
+    // despite this whole function running from a click handler. This used
+    // to retry ONCE on the next document click, which never fires if the
+    // user just starts talking — leaving audioCtxIn (mic capture) suspended
+    // forever: zero frames ever reach the worklet, so nothing is sent to
+    // Gemini and the waveform analyser reads permanently frozen data. Now:
+    // actively verify running state and keep retrying on ANY subsequent
+    // interaction (not just one) until both contexts are confirmed running.
+    await ensureAudioContextsRunning();
     playHead = 0;
 
     started = true;
@@ -547,13 +605,63 @@
     speechElapsedS = 0;
     setupDone = false;
     greetPending = true; // greet as soon as setup is acked
+    framesReceived = 0;
 
     setStatus('Connecting...');
     if (els.wrapUpBtn) els.wrapUpBtn.disabled = false;
     openGeminiSession();
+    scheduleMicHealthCheck();
 
     progressTimer = setInterval(updateProgressUI, 400);
     updateProgressUI();
+  }
+
+  // ---------------------------------------------------------------------
+  // AudioContext resume robustness (see startSession()'s comment above the
+  // call site for why this exists) and mic-pipeline health diagnostics.
+  // ---------------------------------------------------------------------
+  async function ensureAudioContextsRunning() {
+    const tryResume = async () => {
+      if (audioCtxIn && audioCtxIn.state === 'suspended') {
+        try { await audioCtxIn.resume(); } catch (e) { /* noop */ }
+      }
+      if (audioCtxOut && audioCtxOut.state === 'suspended') {
+        try { await audioCtxOut.resume(); } catch (e) { /* noop */ }
+      }
+    };
+    await tryResume();
+    console.info('[voice_conversation] AudioContext states after initial resume — in:', audioCtxIn && audioCtxIn.state, 'out:', audioCtxOut && audioCtxOut.state);
+    if ((audioCtxIn && audioCtxIn.state === 'suspended') || (audioCtxOut && audioCtxOut.state === 'suspended')) {
+      const events = ['click', 'touchstart', 'keydown'];
+      const retryHandler = () => {
+        tryResume().then(() => {
+          const inOk = !audioCtxIn || audioCtxIn.state === 'running';
+          const outOk = !audioCtxOut || audioCtxOut.state === 'running';
+          if (inOk && outOk) {
+            events.forEach((evt) => document.removeEventListener(evt, retryHandler));
+          }
+        });
+      };
+      events.forEach((evt) => document.addEventListener(evt, retryHandler));
+    }
+  }
+
+  let framesReceived = 0;
+  let micHealthCheckHandle = null;
+  const MIC_HEALTH_CHECK_MS = 4000;
+
+  function scheduleMicHealthCheck() {
+    if (micHealthCheckHandle) clearTimeout(micHealthCheckHandle);
+    micHealthCheckHandle = setTimeout(() => {
+      if (started && !finished && framesReceived === 0) {
+        setStatus('Not detecting any microphone input — check the correct device is selected and unmuted, then tap the mic to try again.');
+        console.warn(
+          '[voice_conversation] no worklet frames received within', MIC_HEALTH_CHECK_MS,
+          'ms. audioCtxIn.state =', audioCtxIn && audioCtxIn.state,
+          '— if suspended, this is the known resume-erosion issue; if running, check OS-level mic mute/device selection.'
+        );
+      }
+    }, MIC_HEALTH_CHECK_MS);
   }
 
   function wrapUp() {
@@ -637,6 +745,11 @@
   }
 
   function cleanup() {
+    disarmGateWatchdog();
+    if (micHealthCheckHandle) {
+      clearTimeout(micHealthCheckHandle);
+      micHealthCheckHandle = null;
+    }
     try {
       if (ws) ws.close();
     } catch (e) {

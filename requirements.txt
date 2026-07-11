@@ -1,4 +1,10 @@
-streamlit>=1.37.0
+# torch/torchvision would otherwise resolve to PyPI's default CUDA-bundled
+# build (several GB of unused cuDNN/cuBLAS/NCCL libs on a CPU-only host) —
+# this extra index plus the exact +cpu pin below is what forces the CPU-only
+# wheel instead. See the SER section for why.
+--extra-index-url https://download.pytorch.org/whl/cpu
+
+streamlit>=1.50.0
 sqlalchemy>=2.0
 pymysql>=1.1.0
 pandas>=2.0
@@ -11,9 +17,27 @@ tqdm>=4.66
 googlemaps>=4.10.0
 requests>=2.32.0
 streamlit-js-eval>=0.1.7
-torch
-# SER — emotion2vec_plus_large via FunASR (Phase 1 guide.md)
-# Install separately: pip install funasr modelscope
+
+# SER — emotion2vec_plus_seed via FunASR, running in-process (including on
+# Streamlit Community Cloud). Sized down from the original _large backbone
+# (~1.0 GB vs. ~1.9 GB checkpoint) specifically to fit the free tier's RAM
+# budget — see config.py's SER_MODEL_ID comment for the full rationale and
+# app/engine/_ser_crema.py for why the CREMA-D 4-class probe is currently
+# disabled (it was trained on _large's embeddings specifically).
+# torch/torchaudio are pinned to the exact CPU build (measured ~2.3GB smaller
+# than the default CUDA build across the full stack); torchvision is NOT
+# required by this audio-only pipeline and is deliberately omitted.
+# torchaudio is NOT declared as a hard dependency by funasr's own packaging
+# but IS imported unconditionally by funasr.utils.load_utils — omitting it
+# only breaks on a truly fresh install (confirmed via a clean-venv test);
+# an existing dev machine can have it already present from unrelated history
+# and mask this exact gap, which is what happened here.
+torch==2.8.0+cpu
+torchaudio==2.8.0+cpu
 funasr>=1.1.0
 modelscope>=1.14.0
-torchvision
+
+# If in-process SER still proves too heavy on your actual Streamlit Cloud
+# quota, config.py's SER_REMOTE_URL is a documented fallback that routes
+# inference to a separately-hosted server instead — see server/README.md.
+# It needs no change to this file; unset (default) means fully in-process.

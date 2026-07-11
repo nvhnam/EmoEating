@@ -1,6 +1,6 @@
 # EmoEating
 
-Emotion-based meal recommendation web app. A user's emotional state — chosen manually or detected from voice via Speech Emotion Recognition (SER) — is mapped onto an affect/zone model, converted into a nutritional need vector, and used to score and rank meals from a MySQL food database. Built with Streamlit.
+Emotion-based meal recommendation web app. A user's emotional state — elicited through a live voice conversation with a Gemini agent (or chosen manually) and detected via Speech Emotion Recognition (SER) — is mapped onto an affect/zone model, converted into a nutritional need vector, and used to score and rank meals from a MySQL food database. Built with Streamlit. The Gemini Live conversational elicitation is one of this project's core research contributions, not just a UI convenience.
 
 ## Tech stack
 
@@ -11,14 +11,14 @@ Emotion-based meal recommendation web app. A user's emotional state — chosen m
 | Compute | pandas, numpy |
 | Charts | Plotly |
 | Fuzzy matching | rapidfuzz |
-| Voice SER | funasr / modelscope (local), Google Gemini Live (cloud) |
+| Voice SER | Google Gemini Live (conversational elicitation, runs client-side in the browser), funasr / modelscope (emotion2vec_plus_seed) for classification — the whole stack runs in-process everywhere, including Streamlit Community Cloud |
 | External APIs | Google Places / Foursquare / HERE / OSM (restaurants), IP-geo / Nominatim (geocoding) |
 | Config | python-dotenv |
 
 ## Running it
 
 ```bash
-pip install -r requirements.txt          # SER extras (funasr, modelscope) install separately
+pip install -r requirements.txt          # includes funasr/modelscope/torch (CPU) for voice SER
 cp .env.example .env                     # fill in DB creds + API keys
 
 mysql -u root -p moodmeal    < data/sql/01_schema.sql
@@ -31,7 +31,7 @@ python etl/run_etl.py --datasets usda foodcom epicurious indian off   # see --he
 streamlit run app/main.py
 ```
 
-Env vars live in `.env` (keys prefixed `MOODMEAL_` — legacy naming, kept to match the existing database; see `.env.example`). `USE_VN_DATA=true` switches the app to the Vietnamese schema (`moodmeal_vn`). Voice-component dev harness: `streamlit run scripts/dev_voice_component_harness.py`.
+Env vars live in `.env` (keys prefixed `MOODMEAL_` — legacy naming, kept to match the existing database; see `.env.example`). `USE_VN_DATA=true` switches the app to the Vietnamese schema (`moodmeal_vn`). `packages.txt` (ffmpeg, libsndfile1) provides the system audio libraries funasr needs — Streamlit Community Cloud reads it automatically; for any other Linux host, `apt-get install -y $(cat packages.txt)` before installing Python deps.
 
 ## Directory structure
 
@@ -41,11 +41,12 @@ Env vars live in `.env` (keys prefixed `MOODMEAL_` — legacy naming, kept to ma
 | `app/config.py` | Central config: emotion coordinates, zones, ENMS scoring weights, RDA references, DB env vars, disclaimer text |
 | `app/pages/` | Wizard pages, in order: `01_home` → `02_profile` → `03_emotion` → `04_recommendations` → `05_methodology` |
 | `app/engine/` | Recommendation + SER pipeline (see below) |
-| `app/services/` | External integrations: `gemini_voice`, `food_images`, `image_cache`, `food_name_normalizer`, `location`, `restaurant_finder` |
-| `app/components/` | UI widgets: `emotion_selector`, `circumplex_plot`, `meal_card`, `nutrient_bars`, `profile_form`, `food_image_gallery`, `skeleton_loader`, `restaurant_panel`, `voice_conversation/` |
+| `app/services/` | External integrations: `gemini_voice` (Gemini Live ephemeral token minting — the voice check-in's server-side piece), `food_images`, `image_cache`, `food_name_normalizer`, `location`, `restaurant_finder` |
+| `app/components/` | UI widgets: `emotion_selector`, `circumplex_plot`, `meal_card`, `nutrient_bars`, `profile_form`, `food_image_gallery`, `skeleton_loader`, `restaurant_panel`, `voice_conversation/` (the Gemini Live conversation custom component — mic capture, WebSocket, agent-voice gate) |
 | `app/db/` | `connection.py` (SQLAlchemy engine, picks schema via `USE_VN_DATA`), `queries.py` (typed SQL), `session_logger.py` |
-| `app/models/` | Trained SER linear-probe weights (`best_linear_probe.pt`) + config |
+| `app/models/` | Trained SER linear-probe weights (`best_linear_probe.pt`) + config — currently inactive, see SER voice pipeline section |
 | `app/utils/` | `formatting.py`, `validation.py` helpers |
+| `server/` | Deployable FastAPI wrapper around `app/engine/ser_engine.py` — a documented fallback if in-process SER proves too heavy on your actual Streamlit Cloud quota, not needed by default. See `server/README.md` |
 | `etl/` | Data ingestion pipeline (see below) |
 | `data/sql/` | Schema + seed + migration SQL (main `moodmeal`, Vietnamese `moodmeal_vn`) |
 | `data/raw/` | Source datasets (USDA, Food.com, Epicurious, Indian, OpenFoodFacts, Vietnamese) |
@@ -70,14 +71,50 @@ Emotion (manual or SER) → **Physiological** → **Zone** → **NeedVector** �
 
 Zone definitions, macro ratios/weights, and micronutrient priorities per zone all live in `app/config.py`.
 
-## SER voice pipeline (two backends)
+## SER voice pipeline
 
-| Backend | Description | Files |
-|---------|-------------|-------|
-| Local SER | Audio → emotion2vec embedding → zone, via one of two swappable classifiers | `app/engine/ser_engine.py` (router), `app/engine/_ser_original.py` (9-class), `app/engine/_ser_crema.py` (CREMA-D 4-class linear probe), `app/models/` |
-| Gemini Live | Cloud voice conversation; mints ephemeral tokens server-side, audio classified via the same local SER on completion | `app/services/gemini_voice.py`, `app/components/voice_conversation/` |
+Two independent concerns, easy to conflate but worth keeping separate:
 
-Active backend is selected by `SER_BACKEND` in `app/config.py`. Both paths funnel into the same zone → need-vector → scoring chain.
+| Piece | Description | Files |
+|-------|-------------|-------|
+| Voice conversation (capture) | Live mic capture + Gemini Live WebSocket conversation, running almost entirely client-side in the browser; collects user-only audio. **A core research contribution** — the conversational elicitation itself, not just a recording mechanism. Cheap and was never the source of the cloud RAM issue: it needs one lightweight server-side ephemeral-token mint, nothing else | `app/services/gemini_voice.py` (token minting), `app/components/voice_conversation/` (the custom component) |
+| SER classification | The collected audio → emotion2vec's built-in classification head → zone. This is what actually needed a multi-GB model load, and is the part that broke on Streamlit Community Cloud | `app/engine/ser_engine.py` (router), `app/engine/_ser_original.py` (the only active backend — "original" 9-class, off-the-shelf), `app/models/` |
+| Remote SER (fallback) | Same classifier code, run as a FastAPI service elsewhere — used instead of in-process funasr only if `SER_REMOTE_URL` is set. Does not affect the conversation step above at all | `app/engine/_ser_remote.py` (client), `server/` (the deployable service) |
+
+The active backbone is `iic/emotion2vec_plus_seed` (`SER_MODEL_ID` in
+`app/config.py`) — sized down from the original `_large` variant (~1.0 GB vs.
+~1.9 GB checkpoint) specifically so classification fits Streamlit Community
+Cloud's free-tier RAM budget running in-process, alongside the (already
+cloud-safe) Gemini conversation. The CREMA-D 4-class linear probe
+(`_ser_crema.py`, `app/models/best_linear_probe.pt`) is **currently
+disabled** (`SER_BACKEND = "original"`) — that probe was trained
+specifically on `_large`'s 1024-d embeddings and is not compatible with the
+smaller backbone; selecting it via the `?debug=1` panel raises a clear
+error rather than silently mis-predicting (see `_ser_crema.py`'s dimension
+check). Retrain a probe against the seed backbone's embedding dimension
+before re-enabling it.
+
+### Deploying to Streamlit Community Cloud
+
+1. Set `GEMINI_API_KEY` in the app's Secrets — required for the voice
+   conversation (unrelated to the RAM issue below; always worked on cloud).
+2. `requirements.txt` already pins CPU-only torch + the smaller
+   `emotion2vec_plus_seed` backbone, and `packages.txt` supplies the system
+   audio libraries (`ffmpeg`, `libsndfile1`) Streamlit Cloud's base image
+   lacks by default — both are read automatically by Streamlit Cloud's build.
+3. Deploy as normal; no extra secrets are required for SER classification
+   itself beyond the above.
+4. **If classification still doesn't fit** your actual Streamlit Cloud RAM
+   quota (this wasn't verified against a live Streamlit Cloud deploy — only
+   measured locally and via a real Docker build), fall back to the separate
+   inference server: deploy `server/` (see `server/README.md`), then set
+   `SER_REMOTE_URL` + `SER_REMOTE_TOKEN` in the Streamlit Cloud app's
+   Secrets. No code change needed either way — `ser_engine.py` routes
+   in-process vs. remote purely based on whether `SER_REMOTE_URL` is set,
+   and the Gemini conversation step is unaffected either way.
+5. If SER classification is unavailable through either path, the Emotion
+   page degrades gracefully to the manual mood picker (no dead-end
+   "pip install" message shown to hosted users).
 
 ## ETL pipeline
 
@@ -110,7 +147,10 @@ Active backend is selected by `SER_BACKEND` in `app/config.py`. Both paths funne
 | Change ranking / dedupe logic | `app/engine/recommender.py` |
 | Add a new food data source | `etl/loaders/` (new loader) + register in `etl/run_etl.py` |
 | Adjust DB connection / schema switch | `app/config.py`, `app/db/connection.py`, `.env` |
-| Swap or tune the SER backend | `app/config.py` (`SER_BACKEND`), `app/engine/ser_engine.py` |
+| Swap the SER backbone size or model | `app/config.py` (`SER_MODEL_ID`) — remember the CREMA-D probe is backbone-size-locked, see SER voice pipeline section |
+| Retrain the CREMA-D probe for the current backbone | Not present in this repo — `app/models/best_linear_probe.pt` was trained externally; see `app/models/linear_probe_config.json` for the expected format |
+| Deploy the SER fallback server (only if in-process SER doesn't fit your cloud RAM quota) | `server/README.md`, `app/engine/_ser_remote.py`, `SER_REMOTE_URL`/`SER_REMOTE_TOKEN` in `.env.example` |
+| Tune the Gemini Live voice conversation (elicitation prompts, timing, voice) | `app/services/gemini_voice.py`, `app/components/voice_conversation/`, `VOICE_TARGET_SPEECH_S`/`VOICE_TIMEOUT_S` in `app/config.py` |
 | Edit a wizard page | `app/pages/0X_*.py` |
 | Change the disclaimer text | `app/config.py` (`UI_DISCLAIMER`) |
 | Fix food image fetching | `app/services/food_images.py`, `app/services/image_cache.py`, `app/services/food_name_normalizer.py` |

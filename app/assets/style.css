@@ -218,6 +218,35 @@ section[data-testid="stSidebar"] {
     font-weight: 600;
 }
 
+/* ── SER analysis loading — brand pulse (echoes the voice mic-ring motif) ──── */
+.ser-loading {
+    display: flex;
+    align-items: center;
+    gap: 14px;
+    max-width: 520px;
+    margin: 8px auto 0;
+}
+.ser-pulse {
+    position: relative;
+    flex-shrink: 0;
+    width: 14px;
+    height: 14px;
+    border-radius: 50%;
+    background: var(--brand);
+}
+.ser-pulse::after {
+    content: "";
+    position: absolute;
+    inset: -6px;
+    border-radius: 50%;
+    border: 2px solid var(--brand);
+    animation: serPulse 1.4s ease-out infinite;
+}
+@keyframes serPulse {
+    0%   { transform: scale(0.6);  opacity: 0.7; }
+    100% { transform: scale(1.55); opacity: 0; }
+}
+
 .meal-card {
     background: var(--card);
     border: 1px solid var(--border);
@@ -499,5 +528,10 @@ label[data-testid="stWidgetLabel"] p {
     .skeleton-shimmer {
         animation: none !important;
         background: var(--border) !important;
+    }
+    .ser-pulse::after {
+        animation: none !important;
+        opacity: 0.35 !important;
+        transform: scale(1.2);
     }
 }
