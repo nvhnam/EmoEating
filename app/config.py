@@ -72,7 +72,7 @@ THETA_NEUTRAL = 0.25
 ZONE_LABELS = {
     "Q1_POS_ACT":       "Positive Activation",    # happy, excited — +V, +A
     "Q2_NEG_ACT":       "Negative Activation",    # stressed, anxious, angry — −V, +A
-    "Q3_NEG_DEACT":     "Negative Deactivation",  # tired, sad, bored — −V, −A
+    "Q3_NEG_DEACT":     "Negative Deactivated",   # tired, sad, bored — −V, −A
     "NEUTRAL_BASELINE": "Neutral Baseline",        # neutral, calm, content
 }
 # Legacy single-hex-per-zone contract (existing call sites use ZONE_COLORS[zone]
@@ -80,15 +80,28 @@ ZONE_LABELS = {
 # need the AA-legible text color or a panel tint should use ZONE_PALETTE directly.
 ZONE_COLORS = {zone: ramp["accent"] for zone, ramp in ZONE_PALETTE.items()}
 
-# ── SER (Phase 1 & 7) — emotion2vec_plus_large → zone lookup ─────────────────
+# ── SER (Phase 1 & 7) — emotion2vec_plus_seed → zone lookup ──────────────────
 # FunASR AutoModel inference: 16 kHz mono WAV → class softmax → zone.
 # Ma et al. (2024), Findings of ACL 2024. DOI: 10.18653/v1/2024.findings-acl.931
 #
 # Backend selection:
-#   "original"    — 9-class off-the-shelf (Phase 1 baseline)
-#   "crema4class" — CREMA-D 4-class linear probe (Phase 7; val WA=92.9%, CCC=0.83)
-SER_BACKEND  = "crema4class"
-SER_MODEL_ID = "iic/emotion2vec_plus_large"
+#   "original"    — 9-class off-the-shelf (uses the model's own built-in
+#                    classification head; works with ANY emotion2vec+ size)
+#   "crema4class" — CREMA-D 4-class linear probe (Phase 7; val WA=92.9%,
+#                    CCC=0.83) — NOTE: that probe (app/models/best_linear_probe.pt)
+#                    was trained on 1024-d embeddings from emotion2vec_plus_large
+#                    specifically (see app/models/linear_probe_config.json).
+#                    It is NOT compatible with a different-sized backbone and
+#                    will raise at load time rather than silently mis-predict
+#                    (see _ser_crema.py's dimension check) — retrain a new
+#                    probe before re-enabling it against a different SER_MODEL_ID.
+#
+# SER_MODEL_ID is intentionally the smaller "seed" variant (~1.0 GB checkpoint,
+# vs. ~1.9 GB for "large") together with the size-agnostic "original" backend,
+# so the whole SER stack can run in-process on Streamlit Community Cloud's
+# free-tier RAM budget instead of needing the separate server/ (see below).
+SER_BACKEND  = "original"
+SER_MODEL_ID = "iic/emotion2vec_plus_seed"
 
 # ── Backend A: original 9-class ───────────────────────────────────────────────
 SER_EMOTION_CLASSES = [
@@ -99,6 +112,12 @@ SER_EMOTION_CLASSES = [
 # Zone is selected by marginalising the full class distribution over this
 # table (per-zone probability mass, max-mass zone wins), not by taking the
 # argmax class first — see _ser_original.py::predict_zone_from_audio.
+# "<unk>" confirmed present (empirically, near-zero probability mass) in
+# emotion2vec_plus_seed's raw output alongside "unknown" — both map the same
+# way. _ser_original.py's zone_mass.get(cls, "NEUTRAL_BASELINE") already
+# handled this gracefully before it was added explicitly here; listed now so
+# the full observed label set is documented rather than relying on the
+# fallback silently.
 SER_EMOTION_TO_ZONE: dict[str, str] = {
     "happy":     "Q1_POS_ACT",
     "surprised": "Q1_POS_ACT",
@@ -109,7 +128,25 @@ SER_EMOTION_TO_ZONE: dict[str, str] = {
     "neutral":   "NEUTRAL_BASELINE",
     "other":     "NEUTRAL_BASELINE",
     "unknown":   "NEUTRAL_BASELINE",
+    "<unk>":     "NEUTRAL_BASELINE",
 }
+
+# ── Remote SER inference (fallback for Streamlit Community Cloud) ────────────
+# The primary path (this file's SER_MODEL_ID/SER_BACKEND above) runs funasr
+# in-process everywhere, including on Streamlit Community Cloud, using the
+# smaller "seed" backbone specifically so it fits the free tier's RAM budget.
+# If that still proves too heavy in practice, SER_REMOTE_URL is a documented
+# fallback: it routes inference to an identical copy of engine/ser_engine.py
+# running as a small FastAPI service elsewhere (see server/) instead of
+# importing funasr locally. Unset (the default) means fully in-process, both
+# locally and on cloud. See server/README.md to deploy the fallback service.
+# Default timeout is generous (not just inference latency): server/main.py
+# warms up its default backend at startup, but switching backends via the
+# ?debug=1 selector triggers a fresh cold model load server-side (measured
+# ~30-60s locally) on the next request.
+SER_REMOTE_URL     = os.getenv("SER_REMOTE_URL", "")
+SER_REMOTE_TOKEN   = os.getenv("SER_REMOTE_TOKEN", "")
+SER_REMOTE_TIMEOUT_S = float(os.getenv("SER_REMOTE_TIMEOUT_S", "90"))
 
 # ── Backend B: CREMA-D 4-class linear probe ───────────────────────────────────
 # Probe files are resolved relative to app/ in _ser_crema.py (not configurable
@@ -314,6 +351,8 @@ GEMINI_WS_URL = os.getenv(
 GEMINI_AUTH_TOKENS_URL = "https://generativelanguage.googleapis.com/v1alpha/auth_tokens"
 
 # Conversation termination tuning — end (agent wraps up, then finalize) when EITHER
-# threshold is hit, or the user clicks "Wrap up" manually.
-VOICE_TARGET_SPEECH_S = 50.0   # seconds of detected user speech to collect
-VOICE_TIMEOUT_S       = 100.0  # hard wall-clock cap
+# threshold is hit, or the user clicks "Wrap up" manually. VOICE_TIMEOUT_S is the
+# total-conversation (agent + user) wall-clock budget; the wrap-up goodbye plays
+# INSIDE it (trigger 50s + ≤8s WRAP_UP_MAX_WAIT_MS grace ⇒ ≤58s, under the 60s cap).
+VOICE_TARGET_SPEECH_S = 30.0   # seconds of detected user speech to collect
+VOICE_TIMEOUT_S       = 50.0   # hard wall-clock cap on the full conversation

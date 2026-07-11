@@ -146,6 +146,20 @@ def predict_zone_from_audio(audio_bytes: bytes) -> tuple[str, dict[str, float]]:
     feat = result[0]["feats"]
     if len(feat.shape) > 1:
         feat = feat.mean(axis=0)
+
+    expected_dim = probe.fc.in_features
+    if feat.shape[-1] != expected_dim:
+        from config import SER_MODEL_ID
+        raise RuntimeError(
+            f"CREMA-D probe expects {expected_dim}-d embeddings but the active "
+            f"backbone ({SER_MODEL_ID}) produced {feat.shape[-1]}-d ones. "
+            "app/models/best_linear_probe.pt was trained specifically on "
+            "emotion2vec_plus_large embeddings and is NOT compatible with a "
+            "different-sized backbone — retrain the probe before using "
+            "'crema4class' with this SER_MODEL_ID, or switch SER_BACKEND to "
+            "'original' in config.py (works with any backbone size)."
+        )
+
     feat_t = torch.tensor(feat.astype(np.float32),
                           dtype=torch.float32).unsqueeze(0).to(device)
 

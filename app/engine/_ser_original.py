@@ -1,7 +1,10 @@
 """
-SER Backend A: emotion2vec_plus_large — 9-class off-the-shelf.
+SER Backend A: emotion2vec+ off-the-shelf, 9-class (size set by config.SER_MODEL_ID).
 
-Original Phase 1 implementation (guide.md Phase 1 & 6).
+Original Phase 1 implementation (guide.md Phase 1 & 6). Size-agnostic — uses
+the model's own built-in classification head, so it works with any
+emotion2vec+ checkpoint (seed/base/large) with zero retraining, unlike the
+CREMA-D linear probe in _ser_crema.py.
 Single-pass: 16 kHz mono WAV → 9-class softmax → per-zone probability mass →
 max-mass zone. Marginalising over SER_EMOTION_TO_ZONE (rather than taking the
 argmax class first) uses the full distribution, since three classes
@@ -16,10 +19,16 @@ import os
 import tempfile
 import logging
 
+from config import SER_MODEL_ID as _SER_MODEL_ID
+
 logger = logging.getLogger(__name__)
 
 BACKEND_ID    = "original"
-BACKEND_LABEL = "emotion2vec_plus_large (9-class)"
+# Derived from config.SER_MODEL_ID (not hardcoded) so the UI/debug panel
+# always names the backbone actually running, not a stale literal — this
+# label is user/researcher-facing (03_emotion.py's spinner text and the
+# ?debug=1 backend selector) and matters for methodological transparency.
+BACKEND_LABEL = f"{_SER_MODEL_ID.rsplit('/', 1)[-1]} (9-class)"
 N_CLASSES     = 9
 
 _model = None

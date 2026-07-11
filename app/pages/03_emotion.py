@@ -2,18 +2,28 @@
 Page 3 — Emotion Detection.
 
 Single-path flow: a short voice check-in with a Gemini agent is the only
-entry point users see by default. Speech Emotion Recognition (SER)
-classifies the collected audio into one of four affective zones (guide.md
-Phase 1 & 6); the result is shown in plain language plus its per-class
-probability breakdown, with an explicit confirm-or-adjust step, so users
-stay in control when inference errors occur (per the paper's "user can
-correct the detected zone" contribution). Zone codes, valence/arousal, and
-the SER backend name stay hidden from participants; a researcher can reach
-the backend switcher by appending `?debug=1` to the URL.
+entry point users see by default — the live conversational elicitation is
+one of this paper's core contributions, not just a capture mechanism.
+Speech Emotion Recognition (SER) classifies the collected audio into one of
+four affective zones (guide.md Phase 1 & 6); the result is shown in plain
+language plus its per-class probability breakdown, with an explicit
+confirm-or-adjust step, so users stay in control when inference errors
+occur (per the paper's "user can correct the detected zone" contribution).
+Zone codes, valence/arousal, and the SER backend name stay hidden from
+participants; a researcher can reach the backend switcher by appending
+`?debug=1` to the URL.
+
+The Gemini Live conversation itself (mic capture, WebSocket, agent-voice
+gate) runs almost entirely client-side in the browser plus one lightweight
+server-side ephemeral-token mint (services/gemini_voice.py) — it was never
+the source of the Streamlit Community Cloud SER outage. That was entirely
+the classification step (funasr/emotion2vec loading a multi-GB model), now
+fixed independently by sizing SER_MODEL_ID down to a smaller backbone (see
+config.py) so the whole app — Gemini conversation AND classification —
+runs in-process on the free tier without giving up this contribution.
 
 If SER isn't installed/configured, the manual 11-emotion picker becomes the
 primary (degraded) entry path — see _render_voice_panel()'s fallback branch.
-Classification itself is unchanged from the previous RAVDESS-read flow.
 """
 
 from __future__ import annotations
@@ -78,21 +88,24 @@ def _render_debug_backend_selector() -> None:
     flow (previously a small popover on every visit)."""
     from engine.ser_engine import current_backend, set_backend
 
+    # crema4class deliberately excluded: its linear probe was trained on
+    # emotion2vec_plus_large's 1024-d embeddings and is incompatible with the
+    # smaller default backbone (config.SER_MODEL_ID) — selecting it would
+    # raise at inference time (see _ser_crema.py's dimension check). Restore
+    # it here once a probe is retrained for the active backbone.
     _BACKEND_OPTIONS = {
-        "crema4class": "CREMA-D probe — 4-class",
-        "original":    "Original 9-class (emotion2vec_plus_large off-the-shelf)",
+        "original": "Original 9-class (built-in classification head — works with any backbone size)",
     }
     _cur_id = current_backend()["id"]
     with st.popover("Backend", icon=":material/tune:"):
         selected_id = st.selectbox(
             "SER Backend",
             options=list(_BACKEND_OPTIONS.keys()),
-            index=list(_BACKEND_OPTIONS.keys()).index(_cur_id),
+            index=list(_BACKEND_OPTIONS.keys()).index(_cur_id) if _cur_id in _BACKEND_OPTIONS else 0,
             format_func=lambda k: _BACKEND_OPTIONS[k],
             key="ser_backend_selector",
-            help="Switch between SER backends without restarting. "
-                 "CREMA-D probe is the Phase 7 upgrade (higher valence CCC); "
-                 "Original is the Phase 1 baseline.",
+            help="CREMA-D probe (crema4class) is hidden here until it's "
+                 "retrained for the current backbone — see config.py.",
         )
     if selected_id != _cur_id:
         set_backend(selected_id)
@@ -136,6 +149,11 @@ def _render_manual_path() -> None:
         if st.session_state.get("_show_manual_correct"):
             for k in ("_ser_zone_pending", "_ser_probs_pending", "_ser_top_emotion", "_show_manual_correct"):
                 st.session_state.pop(k, None)
+            # Clearing both ser_zone/probs (above) and _ser_zone_pending here
+            # can make the very next render of _render_voice_panel() fall
+            # through to State A — bump seq so that remounts a fresh
+            # voice_conversation component rather than a stale instance.
+            st.session_state["_voice_component_seq"] = st.session_state.get("_voice_component_seq", 0) + 1
             st.rerun()
 
 
@@ -144,26 +162,34 @@ def _render_manual_path() -> None:
 def _render_voice_panel() -> None:
     """
     Voice emotion detection — live conversation with a Gemini agent, the
-    page's sole default entry point. Supports two swappable classification
-    backends (crema4class / original), switchable only via `?debug=1`. The
-    conversation only collects user-only audio; classification is a single
-    batch call to the existing predict_zone_from_audio(), unchanged from
-    the previous RAVDESS-read flow.
+    page's sole default entry point. Uses the "original" 9-class
+    classification backend (crema4class hidden — see
+    _render_debug_backend_selector()). The conversation only collects
+    user-only audio; classification is a single batch call to the existing
+    predict_zone_from_audio(), unchanged from the previous RAVDESS-read flow.
     """
-    from engine.ser_engine import is_available as ser_available, current_backend
+    from engine.ser_engine import is_available as ser_available, is_remote_configured
     from services.gemini_voice import GeminiVoiceError, is_configured, mint_ephemeral_token
 
     if st.query_params.get("debug") == "1":
         _render_debug_backend_selector()
 
-    backend = current_backend()
-
     if not ser_available():
-        st.warning(
-            "SER module not installed. "
-            "Run `pip install funasr modelscope` and restart to enable voice detection.",
-            icon=":material/warning:",
-        )
+        if is_remote_configured():
+            # This deployment routes SER to a remote server (config.SER_REMOTE_URL) —
+            # a "pip install" instruction would be a dead end here since there's no
+            # local funasr to install. The server is just unreachable/misconfigured.
+            st.warning(
+                "Voice mood detection isn't available right now — please select "
+                "your mood below.",
+                icon=":material/warning:",
+            )
+        else:
+            st.warning(
+                "SER module not installed. "
+                "Run `pip install funasr modelscope` and restart to enable voice detection.",
+                icon=":material/warning:",
+            )
         st.markdown("**Select how you're feeling:**")
         _render_manual_path()
         return
@@ -189,7 +215,7 @@ def _render_voice_panel() -> None:
 
         _render_result_card(zone, top_emotion)
 
-        st.markdown(f"**{backend['n_classes']}-class emotion probabilities**")
+        st.markdown("**Emotion probabilities**")
         for emo, prob in sorted_probs:
             st.progress(min(prob, 1.0), text=f"{emo.capitalize()}: {prob:.1%}")
 
@@ -250,6 +276,10 @@ def _render_voice_panel() -> None:
                         st.session_state.pop(k, None)
                     _clear_reco_cache()
                     st.session_state["_show_manual_correct"] = False
+                    # Bump seq so falling back to State A remounts a fresh
+                    # voice_conversation component instance rather than one
+                    # that might still hold an in-flight/stale session.
+                    st.session_state["_voice_component_seq"] += 1
                     st.rerun()
         return
 
@@ -295,25 +325,41 @@ def _render_voice_panel() -> None:
         if result is not None:
             # ── Analysis phase ───────────────────────────────────────
             # The conversation collected user-only audio; classification
-            # is the SAME single batch call the RAVDESS flow used.
-            with st.spinner(f"Analysing emotion via {backend['label']}..."):
-                try:
-                    from engine.ser_engine import predict_zone_from_audio
-                    audio_bytes = base64.b64decode(result["audio_b64"])
-                    zone, probs = predict_zone_from_audio(audio_bytes)
-                    sorted_probs = sorted(probs.items(), key=lambda x: x[1], reverse=True)
-                    st.session_state["_ser_zone_pending"] = zone
-                    st.session_state["_ser_probs_pending"] = probs
-                    st.session_state["_ser_top_emotion"] = sorted_probs[0][0]
-                    st.session_state.pop("_voice_token", None)
-                    st.rerun()
-                except ImportError as exc:
-                    st.warning(f"SER not available: {str(exc)[:120]}")
-                except RuntimeError as exc:
-                    st.error(
-                        f"Voice analysis failed — try redoing the conversation. "
-                        f"Details: {str(exc)[:200]}"
-                    )
+            # is the SAME single batch call the RAVDESS flow used. No backend/
+            # model identifiers are surfaced here — participants only see that
+            # the system is working and that there's nothing for them to do.
+            loading = st.empty()
+            loading.markdown(
+                '<div class="ser-loading card" role="status" aria-busy="true">'
+                '<span class="ser-pulse" aria-hidden="true"></span>'
+                '<span>'
+                '<span style="font-weight:600; color:var(--ink);">'
+                'Reading your mood from your voice</span><br>'
+                '<span style="font-size:12.5px; color:var(--muted);">'
+                'This only takes a moment — nothing to do but wait.</span>'
+                '</span>'
+                '</div>',
+                unsafe_allow_html=True,
+            )
+            try:
+                from engine.ser_engine import predict_zone_from_audio
+                audio_bytes = base64.b64decode(result["audio_b64"])
+                zone, probs = predict_zone_from_audio(audio_bytes)
+                sorted_probs = sorted(probs.items(), key=lambda x: x[1], reverse=True)
+                st.session_state["_ser_zone_pending"] = zone
+                st.session_state["_ser_probs_pending"] = probs
+                st.session_state["_ser_top_emotion"] = sorted_probs[0][0]
+                st.session_state.pop("_voice_token", None)
+                st.rerun()
+            except ImportError as exc:
+                loading.empty()
+                st.warning(f"SER not available: {str(exc)[:120]}")
+            except RuntimeError as exc:
+                loading.empty()
+                st.error(
+                    f"Voice analysis failed — try redoing the conversation. "
+                    f"Details: {str(exc)[:200]}"
+                )
 
 
 # ── Main page ─────────────────────────────────────────────────────────────────
