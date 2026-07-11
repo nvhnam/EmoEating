@@ -35,6 +35,7 @@ streamlit-js-eval>=0.1.7
 torch==2.8.0+cpu
 torchaudio==2.8.0+cpu
 funasr>=1.1.0
+torchvision
 modelscope>=1.14.0
 
 # If in-process SER still proves too heavy on your actual Streamlit Cloud
